@@ -350,6 +350,32 @@ def get_full_indicators(stock_id, is_tw=True):
         "signals": signals
     }
 
+# ─── 股票資料庫（搜尋用） ─────────────────────────────────────
+TW_STOCKS_DB = {
+    "2330":"台積電","2317":"鴻海","2454":"聯發科","2382":"廣達","2412":"中華電",
+    "3008":"大立光","2308":"台達電","2881":"富邦金","2882":"國泰金","2886":"兆豐金",
+    "2891":"中信金","2884":"玉山金","2885":"元大金","2883":"開發金","2887":"台新金",
+    "2890":"永豐金","2892":"第一金","5880":"合庫金","2303":"聯電","2357":"華碩",
+    "2376":"技嘉","2379":"瑞昱","2395":"研華","2408":"南亞科","2409":"友達",
+    "2474":"可成","3711":"日月光投控","2344":"華邦電","2356":"英業達","2377":"微星",
+    "2385":"群光","2449":"京元電子","2458":"義隆","2498":"宏達電","2603":"長榮",
+    "2609":"陽明","2615":"萬海","2618":"長榮航","2912":"統一超","3045":"台灣大",
+    "3231":"緯創","3481":"群創","4904":"遠傳","4938":"和碩","5871":"中租-KY",
+    "6505":"台塑化","1301":"台塑","1303":"南亞","1326":"台化","0050":"元大台灣50",
+    "0056":"元大高股息","00878":"國泰永續高股息","2105":"正新","1216":"統一",
+    "1101":"台泥","1102":"亞泥","2207":"和泰車","2324":"仁寶","2347":"聯強",
+    "2353":"宏碁","3034":"聯詠","3037":"欣興","3044":"健鼎","3443":"創意",
+    "6415":"矽力-KY","6488":"環球晶","6770":"力積電","8046":"南電",
+    "2360":"致茂","2392":"正崴","2542":"興富發","2548":"華固","2633":"台灣高鐵",
+    "3661":"世芯-KY","3665":"貿聯-KY","5483":"中美晶","6176":"瑞儀",
+    "NVDA":"輝達(NVIDIA)","AAPL":"蘋果(Apple)","MSFT":"微軟(Microsoft)",
+    "TSLA":"特斯拉(Tesla)","META":"Meta","GOOGL":"谷歌(Google)",
+    "AMZN":"亞馬遜(Amazon)","AMD":"超微(AMD)","INTC":"英特爾(Intel)",
+    "TSM":"台積電ADR","AVGO":"博通(Broadcom)","QCOM":"高通(Qualcomm)",
+    "MU":"美光(Micron)","NFLX":"Netflix","DIS":"迪士尼","JPM":"摩根大通",
+    "BAC":"美國銀行","V":"Visa","MA":"Mastercard","WMT":"沃爾瑪",
+}
+
 # ─── 前端路由 ────────────────────────────────────────────────
 
 @app.route("/")
@@ -358,6 +384,20 @@ def index():
     return send_from_directory(BASE_DIR, "quant-trading-live.html")
 
 # ─── API 路由 ────────────────────────────────────────────────
+
+@app.route("/api/search")
+def api_search():
+    """股票搜尋（代號 + 名稱）"""
+    q = request.args.get("q", "").strip()
+    if len(q) < 1:
+        return jsonify([])
+    q_upper = q.upper()
+    results = []
+    for code, name in TW_STOCKS_DB.items():
+        if q_upper in code or q in name or q_upper in name.upper():
+            is_us = not code.replace(".", "").isdigit() and len(code) <= 5
+            results.append({"id": code, "name": name, "market": "us" if is_us else "tw"})
+    return jsonify(results[:12])
 
 @app.route("/api/health")
 def health():
@@ -473,11 +513,11 @@ def api_recommend():
     if cached:
         return jsonify(cached)
 
-    tw_candidates = ["2330", "2317", "2454", "2382", "2412", "3008", "6505", "0050"]
-    us_candidates = ["NVDA", "TSLA", "AAPL", "MSFT", "META"]
+    tw_candidates = ["2330", "2317", "2454", "2382", "2412", "3008", "6505", "0050", "2308", "2303", "2881", "3034"]
+    us_candidates = ["NVDA", "TSLA", "AAPL", "MSFT", "META", "AMD", "AVGO"]
     results = []
 
-    for stock_id in tw_candidates[:5]:
+    for stock_id in tw_candidates[:8]:
         try:
             price_data = fetch_twse_price(stock_id)
             if not price_data or not price_data.get("price"):
@@ -510,7 +550,7 @@ def api_recommend():
         except Exception as e:
             print(f"Recommend TW error {stock_id}: {e}")
 
-    for sym in us_candidates[:3]:
+    for sym in us_candidates[:4]:
         try:
             data = fetch_us_stock(sym)
             if not data:

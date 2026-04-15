@@ -198,6 +198,48 @@ select option{background:var(--bg2)}
 .srv-dot.ok{background:var(--accent);box-shadow:0 0 6px var(--accent)}
 .srv-dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
 .srv-dot.checking{background:var(--yellow);animation:pulse 1s infinite}
+
+/* ── SEARCH AUTOCOMPLETE ── */
+.srchwrap{position:relative;flex:1;max-width:260px;display:none}
+@media(min-width:600px){.srchwrap{display:block}}
+.srch{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px 6px 32px;font-size:12px;outline:none;transition:border-color .2s;font-family:'Noto Sans TC',sans-serif}
+.srch:focus{border-color:var(--accent)}
+.srch-ico{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:11px;pointer-events:none}
+.srch-drop{position:absolute;top:calc(100% + 6px);left:0;right:0;background:rgba(8,14,24,.98);border:1px solid var(--border);border-radius:10px;z-index:999;overflow:hidden;max-height:300px;overflow-y:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.srch-drop.show{display:block}
+.srch-item{padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .12s;border-bottom:1px solid var(--border2)}
+.srch-item:last-child{border-bottom:none}
+.srch-item:hover{background:rgba(0,200,150,.08)}
+.srch-code{font-family:'Rajdhani',monospace;font-size:15px;font-weight:700;color:var(--accent2);min-width:55px}
+.srch-name{font-size:12px;color:var(--text2);flex:1}
+/* ── STOCK DETAIL MODAL ── */
+.sdmodal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:800;display:none;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto;backdrop-filter:blur(6px)}
+.sdmodal.open{display:flex}
+.sdbox{background:var(--bg2);border:1px solid rgba(0,200,150,.2);border-radius:16px;width:100%;max-width:960px;animation:sdIn .22s ease;margin:auto}
+@keyframes sdIn{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+.sdhead{padding:14px 18px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:14px;position:sticky;top:0;background:var(--bg2);border-radius:16px 16px 0 0;z-index:5}
+.sdhead-price{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;line-height:1}
+.sdbody{padding:16px 18px;display:grid;grid-template-columns:1fr 280px;gap:16px}
+@media(max-width:680px){.sdbody{grid-template-columns:1fr}}
+.sdclose{margin-left:auto;background:none;border:none;color:var(--text3);font-size:22px;cursor:pointer;line-height:1;padding:4px 8px;border-radius:6px;transition:all .2s}
+.sdclose:hover{background:rgba(255,255,255,.07);color:var(--text)}
+.sd-ind-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);font-size:12px}
+.sd-ind-row:last-child{border-bottom:none}
+.sd-ind-name{color:var(--text2);min-width:80px}
+.sd-ind-val{font-family:'JetBrains Mono',monospace;flex:1;text-align:center}
+/* ── RECOMMEND MINI ── */
+.rec10-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.rec10-item{background:rgba(0,200,150,.03);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;cursor:pointer;transition:all .18s}
+.rec10-item:hover{border-color:var(--accent);background:rgba(0,200,150,.07);transform:translateY(-2px)}
+/* ── STRATEGY LIBRARY ── */
+.stratlib{display:flex;flex-direction:column;gap:8px}
+.stratlib-item{background:rgba(0,0,0,.2);border:1px solid var(--border2);border-radius:8px;padding:11px 14px;cursor:pointer;transition:all .18s;display:flex;align-items:flex-start;gap:10px}
+.stratlib-item:hover{border-color:var(--accent);background:rgba(0,200,150,.05)}
+.stratlib-item.active{border-color:var(--accent);background:rgba(0,200,150,.08)}
+.stratlib-wr{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--accent);min-width:44px;text-align:center}
+.stratlib-name{font-size:12px;font-weight:600;color:var(--text);margin-bottom:3px}
+.stratlib-desc{font-size:10px;color:var(--text3);line-height:1.5}
+
 </style>
 </head>
 <body>
@@ -215,6 +257,12 @@ select option{background:var(--bg2)}
     <div class="logo">
       <div class="logo-icon">⬡</div>
       <div>QuantEdge<br><small>REAL DATA · LIVE</small></div>
+    </div>
+    <div class="srchwrap">
+      <span class="srch-ico">&#9906;</span>
+      <input class="srch" id="globalSearch" placeholder="搜尋股票代號或名稱..." autocomplete="off"
+        oninput="onSearch(this.value)" onblur="setTimeout(closeSearch,180)" onfocus="if(this.value)onSearch(this.value)">
+      <div class="srch-drop" id="searchDrop"></div>
     </div>
     <div class="hstats" id="hstats">
       <div class="hstat"><div class="hstat-v" id="h-twii">—</div><div class="hstat-l">加權指數</div></div>
@@ -287,6 +335,11 @@ select option{background:var(--bg2)}
 
   <div class="g2 gap">
     <div>
+      <!-- Strategy Library -->
+      <div class="card mb16">
+        <div class="ctitle">&#127942; 高勝率策略庫 <span class="badge">點擊套用</span></div>
+        <div class="stratlib" id="stratLib"></div>
+      </div>
       <!-- Block Library -->
       <div class="card mb16">
         <div class="ctitle">📦 指標積木庫</div>
@@ -559,6 +612,50 @@ select option{background:var(--bg2)}
   <button class="mtab" onclick="go('technical');mact(this)"><span class="mtab-i">⌘</span>技術</button>
 </nav>
 
+<!-- STOCK DETAIL MODAL -->
+<div class="sdmodal" id="sdModal" onclick="if(event.target===this)closeStockModal()">
+  <div class="sdbox">
+    <div class="sdhead">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-family:Rajdhani;font-size:22px;font-weight:700;color:var(--accent2)" id="sd-id">&#8212;</span>
+          <span style="font-size:14px;color:var(--text2)" id="sd-name">&#8212;</span>
+          <span id="sd-mkt-tag"></span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-top:4px;flex-wrap:wrap">
+          <span class="sdhead-price" id="sd-price">&#8212;</span>
+          <span style="font-size:13px;font-family:JetBrains Mono" id="sd-chg">&#8212;</span>
+          <span id="sd-action-tag"></span>
+        </div>
+      </div>
+      <button class="sdclose" onclick="closeStockModal()">&#x2715;</button>
+    </div>
+    <div class="sdbody">
+      <div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px" id="sd-chart-title">K線走勢圖</div>
+        <canvas id="sdKlineChart" height="200" style="width:100%"></canvas>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:3px;font-family:JetBrains Mono" id="sdKlineLabels"></div>
+        <div style="margin-top:14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="text-align:center">
+            <div style="font-family:Rajdhani;font-size:42px;font-weight:700;color:var(--accent);line-height:1;text-shadow:0 0 20px rgba(0,200,150,.4)" id="sd-score">&#8212;</div>
+            <div style="font-size:10px;color:var(--text3)">綜合評分 / 100</div>
+          </div>
+          <div style="flex:1"><div style="font-size:12px;line-height:1.9;color:var(--text2)" id="sd-advice">載入中...</div></div>
+        </div>
+        <div style="margin-top:10px" id="sd-news-wrap"></div>
+      </div>
+      <div>
+        <div style="font-family:Rajdhani;font-size:13px;font-weight:600;letter-spacing:1px;color:var(--accent2);margin-bottom:8px">技術指標</div>
+        <div id="sd-ind-list"><div class="loading"><div class="spinner"></div></div></div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="addToMonitorFromModal()">+ 加入監控</button>
+          <button class="btn btnp btn-sm" onclick="viewTechFromModal()">完整分析</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -567,12 +664,160 @@ const API = (location.hostname === "localhost" || location.hostname === "127.0.0
   ? "http://localhost:5000/api"
   : window.location.origin + "/api";
 
+// ── SEARCH ─────────────────────────────────────────
+async function onSearch(q){
+  const drop=$('searchDrop');
+  if(!q||q.length<1){drop.classList.remove('show');return;}
+  try{
+    const r=await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+    const items=await r.json();
+    if(!items.length){drop.classList.remove('show');return;}
+    drop.innerHTML=items.map(s=>`<div class="srch-item" onmousedown="selectStock('${s.id}','${s.market}')">
+      <span class="srch-code">${s.id}</span>
+      <span class="srch-name">${s.name}</span>
+      <span class="tag ${s.market==='us'?'tb':'tg'}" style="font-size:9px">${s.market==='us'?'US':'TW'}</span>
+    </div>`).join('');
+    drop.classList.add('show');
+  }catch(e){}
+}
+function closeSearch(){$('searchDrop').classList.remove('show');}
+function selectStock(id,market){$('globalSearch').value='';closeSearch();openStockModal(id,market);}
+
+// ── STOCK MODAL ────────────────────────────────────
+let _mStock={id:'',market:''};
+async function openStockModal(id,market){
+  _mStock={id,market};
+  $('sdModal').classList.add('open');
+  document.body.style.overflow='hidden';
+  $('sd-id').textContent=id;
+  $('sd-name').textContent='載入中...';
+  $('sd-price').textContent='—';$('sd-chg').textContent='';
+  $('sd-score').textContent='—';$('sd-advice').textContent='載入中...';
+  $('sd-ind-list').innerHTML='<div class="loading"><div class="spinner"></div></div>';
+  $('sd-news-wrap').innerHTML='';
+  $('sd-mkt-tag').innerHTML=market==='us'?'<span class="tag tb" style="font-size:10px">🇺🇸 美股</span>':'<span class="tag tg" style="font-size:10px">🇹🇼 台股</span>';
+  $('sd-action-tag').innerHTML='';
+  try{
+    const r=await fetch(`${API}/stock/${id}?market=${market}`);
+    if(!r.ok) throw new Error();
+    const data=await r.json();
+    const ind=data.indicators||{};
+    const hist=data.history||{};
+    $('sd-name').textContent=data.name||id;
+    const price=data.price||0;const chg=data.change_pct||0;
+    $('sd-price').textContent='$'+fmtN(price);
+    $('sd-price').className='sdhead-price '+chgClass(chg);
+    $('sd-chg').textContent=chgStr(chg);
+    $('sd-chg').className='mono '+chgClass(chg);
+    $('sd-action-tag').innerHTML=signal2tag(ind.action||'觀察');
+    $('sd-chart-title').textContent=`${id} · ${data.name||''} K線走勢圖`;
+    if(hist&&hist.closes) setTimeout(()=>drawKlineChart('sdKlineChart','sdKlineLabels',hist),60);
+    $('sd-score').textContent=ind.score||'—';
+    const MA=ind.MA||{};const BB=ind.Bollinger||{};const KD=ind.KD||{};const MACD=ind.MACD||{};
+    const rsi=ind.RSI14;const atr=ind.ATR14;
+    const s2=(ok)=>ok?'<span style="background:rgba(0,200,150,.12);color:var(--accent);font-size:10px;padding:2px 7px;border-radius:3px">看多</span>':'<span style="background:rgba(255,77,109,.12);color:var(--red);font-size:10px;padding:2px 7px;border-radius:3px">看空</span>';
+    $('sd-ind-list').innerHTML=`
+      <div class="sd-ind-row"><span class="sd-ind-name">RSI(14)</span><span class="sd-ind-val">${fmt(rsi)}</span>${rsi<30?'<span style="background:rgba(0,200,150,.12);color:var(--accent);font-size:10px;padding:2px 7px;border-radius:3px">超賣</span>':rsi>70?'<span style="background:rgba(255,77,109,.12);color:var(--red);font-size:10px;padding:2px 7px;border-radius:3px">超買</span>':'<span style="background:rgba(255,209,102,.12);color:var(--yellow);font-size:10px;padding:2px 7px;border-radius:3px">中性</span>'}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">MACD</span><span class="sd-ind-val ${MACD.macd>0?'up':'dn'}">${fmt(MACD.macd,3)}</span>${s2(MACD.cross==='golden')}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">K / D</span><span class="sd-ind-val">${fmt(KD.K)} / ${fmt(KD.D)}</span>${s2(KD.K>KD.D)}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">MA5</span><span class="sd-ind-val">$${fmtN(MA.MA5)}</span>${s2(price>MA.MA5)}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">MA20</span><span class="sd-ind-val">$${fmtN(MA.MA20)}</span>${s2(price>MA.MA20)}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">布林上</span><span class="sd-ind-val">$${fmtN(BB.upper)}</span>${s2(price<BB.upper)}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">布林下</span><span class="sd-ind-val">$${fmtN(BB.lower)}</span>${s2(price>BB.lower)}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">量能比</span><span class="sd-ind-val">${fmt(ind.volume_ratio)}x</span>${s2(ind.volume_ratio>1)}</div>
+      <div class="sd-ind-row"><span class="sd-ind-name">ATR(14)</span><span class="sd-ind-val">${fmt(atr)}</span><span style="background:rgba(76,201,240,.12);color:var(--blue);font-size:10px;padding:2px 7px;border-radius:3px">波動</span></div>`;
+    $('sd-advice').innerHTML=`訊號：<strong style="color:var(--accent)">${ind.action||'觀察'}</strong> · 勝率 <strong style="color:var(--accent)">${ind.winrate||60}%</strong><br>
+      <span style="font-size:11px">進場 <span class="mono" style="color:var(--accent)">$${fmtN(price)}</span> · 目標 <span class="mono" style="color:var(--accent)">$${fmtN(Math.round(price*1.08))}</span> · 停損 <span class="mono" style="color:var(--red)">$${fmtN(Math.round(price*0.95))}</span></span>`;
+    loadModalNews(id);
+  }catch(e){$('sd-ind-list').innerHTML='<div style="color:var(--text3);text-align:center;padding:20px;font-size:12px">⚠ 無法取得數據</div>';}
+}
+async function loadModalNews(id){
+  try{
+    const r=await fetch(`${API}/news/${id}`);if(!r.ok) return;
+    const news=await r.json();if(!news||!news.length) return;
+    $('sd-news-wrap').innerHTML='<div style="font-size:10px;color:var(--text3);margin-bottom:6px;margin-top:10px;border-top:1px solid var(--border2);padding-top:10px">相關新聞</div>'+
+      news.slice(0,2).map(n=>{
+        const sc=n.sentiment==='positive'?'tg':n.sentiment==='negative'?'tr':'tb';
+        const st=n.sentiment==='positive'?'利多':n.sentiment==='negative'?'利空':'中性';
+        return `<div class="nitem"><span class="tag ${sc}" style="font-size:9px;white-space:nowrap">${st}</span>
+          <div><div class="ntitle"><a href="${n.link}" target="_blank">${n.title}</a></div>
+          <div class="nmeta"><span>${n.publisher}</span><span>${n.time}</span></div></div></div>`;
+      }).join('');
+  }catch(e){}
+}
+function closeStockModal(){$('sdModal').classList.remove('open');document.body.style.overflow='';}
+function addToMonitorFromModal(){
+  const{id,market}=_mStock;
+  if(!monitorStocks.find(s=>s.id===id)){monitorStocks.push({id,market});saveMonitor();}
+  closeStockModal();go('monitor');
+}
+function viewTechFromModal(){
+  const{id,market}=_mStock;
+  $('techStockInput').value=id;$('techMarket').value=market;
+  closeStockModal();go('technical');
+}
+
+// ── STRATEGY LIBRARY ──────────────────────────────
+const STRATEGY_LIB=[
+  {id:'MA_RSI',name:'均線 + RSI 組合',wr:'62~70',desc:'MA5上穿MA20 + RSI 25-50回升，適合趨勢初段',
+   entry:['MA5上穿MA20（黃金交叉）','RSI(14) < 30 超賣回升'],
+   exit:['RSI(14) > 70 超買','MA5下穿MA20（死亡交叉）'],sl:5,tp:15,strategy:'MA_RSI'},
+  {id:'MACD',name:'MACD 動能突破',wr:'58~65',desc:'MACD黃金交叉+柱狀>0+量能確認，適合突破行情',
+   entry:['MACD 黃金交叉且柱狀>0','成交量 > 均量 1.5倍（量增價漲）'],
+   exit:['MACD 死亡交叉','RSI(14) > 75 超買'],sl:5,tp:12,strategy:'MACD'},
+  {id:'KD_RSI',name:'KD + RSI 雙重超賣',wr:'60~68',desc:'雙重確認超賣，適合短線反彈',
+   entry:['KD K值 > D值（多頭）','RSI(14) < 30 超賣回升'],
+   exit:['KD K值 < D值（死亡）','RSI(14) > 75 超買'],sl:4,tp:10,strategy:'KD_RSI'},
+  {id:'TURTLE',name:'海龜突破策略',wr:'40~55',desc:'多重確認突破進場，風險報酬比高，長線持有',
+   entry:['MA5上穿MA20（黃金交叉）','成交量 > 均量 1.5倍（量增價漲）','MACD 黃金交叉且柱狀>0'],
+   exit:['MA5下穿MA20（死亡交叉）'],sl:8,tp:25,strategy:'MA_RSI'},
+  {id:'TRIPLE',name:'三均線多頭排列',wr:'63~72',desc:'MA5>MA20>MA60完美多頭，動能最強',
+   entry:['MA5上穿MA20（黃金交叉）','RSI(14) < 30 超賣回升','MACD 黃金交叉且柱狀>0'],
+   exit:['RSI(14) > 72 超買'],sl:6,tp:18,strategy:'MA_RSI'},
+];
+function initStratLib(){
+  const el=$('stratLib');if(!el) return;
+  el.innerHTML=STRATEGY_LIB.map((s,i)=>`
+    <div class="stratlib-item" id="stlib-${i}" onclick="applyStrategy(${i})">
+      <div style="text-align:center"><div class="stratlib-wr">${s.wr.split('~')[0]}%</div><div style="font-size:8px;color:var(--text3)">勝率</div></div>
+      <div style="flex:1">
+        <div class="stratlib-name">${s.name}</div>
+        <div class="stratlib-desc">${s.desc}</div>
+        <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
+          ${s.entry.map(e=>`<span class="tag tg" style="font-size:9px">${e.split('（')[0]}</span>`).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+}
+function applyStrategy(idx){
+  const s=STRATEGY_LIB[idx];
+  document.querySelectorAll('.stratlib-item').forEach(el=>el.classList.remove('active'));
+  $('stlib-'+idx).classList.add('active');
+  $('btStrategy').value=s.strategy;$('btSL').value=s.sl;$('btTP').value=s.tp;
+  const ec=$('entryConds');
+  const hint=ec.querySelector('div[style*="text-align"]');
+  [...ec.children].forEach(c=>{if(c!==hint)c.remove();});
+  s.entry.forEach(cond=>{
+    const row=document.createElement('div');row.className='condrow';
+    row.innerHTML=`<span class="cop">AND</span><span style="font-size:12px;color:var(--text2)">✦ ${cond}</span><span class="crem" onclick="this.parentElement.remove()">✕</span>`;
+    if(hint) ec.insertBefore(row,hint); else ec.appendChild(row);
+  });
+  $('exitConds').innerHTML=s.exit.map(cond=>
+    `<div class="condrow"><span class="cop">OR</span><span style="font-size:12px;color:var(--text2)">✦ ${cond}</span><span class="crem" onclick="this.parentElement.remove()">✕</span></div>`
+  ).join('');
+}
+
+// ── localStorage for monitor ──────────────────────
 // ── 監控股票列表（預設） ─────────────────────────
-let monitorStocks = [
+const DEF_STOCKS=[
   {id:"2330",market:"tw"},{id:"2317",market:"tw"},{id:"2454",market:"tw"},
   {id:"3008",market:"tw"},{id:"0050",market:"tw"},
   {id:"NVDA",market:"us"},{id:"AAPL",market:"us"}
 ];
+function loadMonitorLS(){try{const s=localStorage.getItem('qe_mon');return s?JSON.parse(s):DEF_STOCKS;}catch(e){return DEF_STOCKS;}}
+function saveMonitor(){try{localStorage.setItem('qe_mon',JSON.stringify(monitorStocks));}catch(e){}}
+function removeFromMonitor(id){monitorStocks=monitorStocks.filter(s=>s.id!==id);saveMonitor();loadMonitor();}
+let monitorStocks=loadMonitorLS();
 let selectedMonStock = null;
 let btResults = {};  // 儲存各策略回測結果
 
@@ -792,20 +1037,24 @@ function drawEquityCurve(canvasId,equity){
   ctx.stroke();
 }
 
-// ── 訊號列表 ─────────────────────────────────────
+// ── 推薦10檔（dashboard rec10）──────────────────────
 function renderSignals(data){
-  if(!data||data.length===0){ $('signalList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px">暫無訊號</div>'; return; }
-  $('signalList').innerHTML=data.slice(0,6).map(s=>{
-    const chg=s.change_pct||0;
-    const sc=sigClass(s.quick_signal);
-    return `<div class="mitem">
-      <span class="sig ${sc}"></span>
-      <div style="flex:1"><div class="scode">${s.id}</div><div class="sname">${s.name||''}</div></div>
-      <div>
-        <div class="sprice ${chgClass(chg)}">$${fmtN(s.price)}</div>
-        <div class="schange ${chgClass(chg)}">${chgStr(chg)}</div>
+  if(!data||data.length===0){ $('signalList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px;grid-column:1/-1">暫無推薦</div>'; return; }
+  $('signalList').innerHTML=data.slice(0,10).map(s=>{
+    const chg=s.change_pct||0;const wr=s.winrate||60;
+    return `<div class="rec10-item" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <div><div style="font-family:Rajdhani;font-size:16px;font-weight:700;color:var(--accent2)">${s.id}</div><div style="font-size:10px;color:var(--text3)">${s.name||''}</div></div>
+        ${signal2tag(s.quick_signal||s.action)}
       </div>
-      <div style="text-align:right">${signal2tag(s.quick_signal)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-family:JetBrains Mono;font-size:13px" class="${chgClass(chg)}">$${fmtN(s.price)}</span>
+        <span style="font-family:JetBrains Mono;font-size:11px" class="${chgClass(chg)}">${chgStr(chg)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+        <div class="pbar" style="flex:1"><div class="pfill g" style="width:${wr}%"></div></div>
+        <span style="font-size:10px;color:var(--accent);font-family:JetBrains Mono">${wr}%</span>
+      </div>
     </div>`;
   }).join('');
   $('signalTime').textContent=new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
@@ -817,7 +1066,7 @@ function renderMarketTable(data){
   $('marketTbody').innerHTML=data.map(s=>{
     const chg=s.change_pct||0;
     const wr=s.winrate||60;
-    return `<tr>
+    return `<tr style="cursor:pointer" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')">
       <td><span class="mono" style="color:var(--accent2)">${s.id}</span> ${s.name||''} <span class="tag ${s.market==='US'?'tb':'tg'}" style="font-size:9px">${s.market}</span></td>
       <td class="mono">$${fmtN(s.price)}</td>
       <td class="mono ${chgClass(chg)}">${s.change>0?'+':''}${fmt(s.change)}</td>
@@ -830,13 +1079,12 @@ function renderMarketTable(data){
 
 // ── Dashboard 載入 ────────────────────────────────
 async function loadDashboard(){
-  loadIndex();
-  loadMainChart();
+  loadIndex();loadMainChart();
+  try{const r=await fetch(`${API}/recommend`);if(r.ok){const d=await r.json();renderSignals(d);}}catch(e){}
   try{
     const r=await fetch(`${API}/monitor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stocks:monitorStocks})});
     if(!r.ok) return;
     const data=await r.json();
-    renderSignals(data);
     renderMarketTable(data);
   }catch(e){ console.log('Dashboard error:',e); }
 }
@@ -853,7 +1101,7 @@ async function loadMonitor(){
       const chg=s.change_pct||0;
       const sc=sigClass(s.quick_signal);
       if(sc==='buy') buy++; else if(sc==='sell') sell++; else hold++;
-      return `<div class="mitem" onclick="selectMonStock('${s.id}','${s.name||s.id}',${s.price||0})">
+      return `<div class="mitem" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')" style="cursor:pointer">
         <span class="sig ${sc}"></span>
         <div style="flex:1"><div class="scode">${s.id}</div><div class="sname">${s.name||''} <span style="font-size:9px">${s.market==='US'?'🇺🇸':'🇹🇼'}</span></div></div>
         <div>
@@ -861,6 +1109,7 @@ async function loadMonitor(){
           <div class="schange ${chgClass(chg)}">${chgStr(chg)}</div>
         </div>
         ${signal2tag(s.quick_signal)}
+        <button class="btn btnd btn-sm" style="padding:3px 7px;font-size:10px;flex-shrink:0" onclick="event.stopPropagation();removeFromMonitor('${s.id}')">✕</button>
       </div>`;
     }).join('');
     $('ms-count').textContent=data.length+' 檔';
@@ -914,7 +1163,7 @@ async function loadRecommend(){
       const wr=s.winrate||60;
       const sigs=(s.signals||[]).slice(0,3).map(sg=>`<span class="tag tg" style="font-size:10px">${sg}</span>`).join('');
       const mktTag=s.market==='US'?'<span class="tag tb" style="font-size:9px">🇺🇸 美股</span>':'<span class="tag tg" style="font-size:9px">🇹🇼 台股</span>';
-      return `<div class="rcard">
+      return `<div class="rcard" style="cursor:pointer" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')">
         <div class="rchead">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
             <div>
@@ -1194,6 +1443,7 @@ function startAutoRefresh(){
 
 // ── 初始化 ───────────────────────────────────────
 window.addEventListener('load',async()=>{
+  initStratLib();
   tick();
   const ok=await checkServer();
   if(ok){
@@ -1201,6 +1451,7 @@ window.addEventListener('load',async()=>{
     startAutoRefresh();
   }
   setInterval(()=>checkServer(),30000);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeStockModal();});
   window.addEventListener('resize',()=>{
     const active=document.querySelector('.page.active');
     if(!active) return;
