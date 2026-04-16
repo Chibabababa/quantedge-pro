@@ -17,8 +17,10 @@ import numpy as np
 import json
 import time
 import threading
+import random
 from datetime import datetime, timedelta
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 CORS(app)  # 允許前端跨域存取
@@ -29,16 +31,59 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── 快取層（避免頻繁爬蟲被封） ───────────────────────────────
 _cache = {}
 _cache_ttl = {}
+_cache_lock = threading.Lock()
 CACHE_SECONDS = 60  # 60秒快取
 
 def cache_get(key):
-    if key in _cache and time.time() < _cache_ttl.get(key, 0):
-        return _cache[key]
+    with _cache_lock:
+        if key in _cache and time.time() < _cache_ttl.get(key, 0):
+            return _cache[key]
     return None
 
 def cache_set(key, val, ttl=CACHE_SECONDS):
-    _cache[key] = val
-    _cache_ttl[key] = time.time() + ttl
+    with _cache_lock:
+        _cache[key] = val
+        _cache_ttl[key] = time.time() + ttl
+
+# ─── 爬蟲安全：速率限制 ─────────────────────────────────────
+# 限制同時對 TWSE 的請求數，避免被封鎖
+_twse_semaphore = threading.Semaphore(3)   # 最多 3 個並行 TWSE 請求
+_yf_semaphore   = threading.Semaphore(5)   # 最多 5 個並行 yfinance 請求
+
+# ─── 台股資料庫（篩選用，含上市+上櫃主要標的） ────────────────
+TW_STOCKS_DB = {
+    # 半導體
+    "2330": "台積電", "2454": "聯發科", "2303": "聯電",
+    "2308": "台達電", "3034": "聯詠", "2379": "瑞昱",
+    "6770": "力積電", "3711": "日月光投控", "2449": "京元電子",
+    # 電子/科技
+    "2317": "鴻海", "2382": "廣達", "2357": "華碩",
+    "2353": "宏碁", "3008": "大立光", "2395": "研華",
+    "4938": "和碩", "2324": "仁寶", "2356": "英業達",
+    "3231": "緯創", "2377": "微星", "2376": "技嘉",
+    # 金融
+    "2881": "富邦金", "2882": "國泰金", "2891": "中信金",
+    "2886": "兆豐金", "2884": "玉山金", "2887": "台新金",
+    "2885": "元大金", "2892": "第一金", "5880": "合庫金",
+    # 電信/傳產
+    "2412": "中華電", "3045": "台灣大", "4904": "遠傳",
+    "1301": "台塑", "1303": "南亞", "1326": "台化",
+    "2002": "中鋼", "1101": "台泥", "1216": "統一",
+    # ETF
+    "0050": "元大台灣50", "0056": "元大高股息",
+    "00878": "國泰永續高股息", "00881": "國泰台灣5G+",
+    # 其他熱門
+    "6505": "台塑化", "2207": "和泰車", "9910": "豐泰",
+    "2912": "統一超", "2327": "國巨", "6669": "緯穎",
+    "2408": "南亞科", "2344": "華邦電", "3037": "欣興",
+    "2615": "萬海", "2603": "長榮", "2609": "陽明",
+}
+
+# 美股篩選候選池
+US_STOCKS_SCREEN = [
+    "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL",
+    "AMD","INTC","QCOM","AVGO","TSM","ASML","NFLX","CRM"
+]
 
 # ─── 技術指標計算 ────────────────────────────────────────────
 def calc_rsi(closes, period=14):
@@ -151,76 +196,145 @@ def winrate_signal(rsi, macd_cross, k, d, price, ma5, ma20):
     return round(winrate, 1), action, signals
 
 # ─── 台股爬蟲（TWSE + TPEX） ────────────────────────────────
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept-Language": "zh-TW,zh;q=0.9"
-}
+# 輪換 User-Agent，降低被辨識為爬蟲的機率
+_UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+]
+
+def get_headers():
+    """每次請求隨機選取 User-Agent，模擬真實瀏覽器行為"""
+    return {
+        "User-Agent": random.choice(_UA_POOL),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://mis.twse.com.tw/",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+    }
+
+# 保留向後兼容的 HEADERS 變數
+HEADERS = get_headers()
+
+def fetch_tw_price_yfinance(stock_id):
+    """yfinance 備援抓台股價格（TWSE/TPEX 失敗時使用）"""
+    with _yf_semaphore:
+        try:
+            for suffix in [".TW", ".TWO"]:
+                ticker = yf.Ticker(f"{stock_id}{suffix}")
+                info = ticker.fast_info
+                price = float(info.last_price or 0)
+                if price > 0:
+                    prev = float(info.previous_close or price)
+                    change = round(price - prev, 2)
+                    change_pct = round((change / prev) * 100, 2) if prev else 0
+                    name = TW_STOCKS_DB.get(stock_id, stock_id)
+                    try:
+                        full_name = ticker.info.get("shortName", name)
+                        if full_name:
+                            name = full_name
+                    except Exception:
+                        pass
+                    result = {
+                        "id": stock_id, "name": name,
+                        "price": price, "yesterday": prev,
+                        "change": change, "change_pct": change_pct,
+                        "volume": int(getattr(info, "three_month_average_volume", 0) or 0),
+                        "market": "TWSE"
+                    }
+                    cache_set(f"twse_{stock_id}", result, 60)
+                    return result
+        except Exception as e:
+            print(f"yfinance TW fallback error {stock_id}: {e}")
+    return None
 
 def fetch_twse_price(stock_id):
-    """從台灣證交所 API 抓即時股價"""
+    """從台灣證交所 API 抓即時股價（含重試 + yfinance 備援）
+    使用 Semaphore 控制並發數，遵守爬蟲禮儀
+    """
     cached = cache_get(f"twse_{stock_id}")
     if cached:
         return cached
 
-    try:
-        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_id}.tw&json=1&delay=0"
-        r = requests.get(url, headers=HEADERS, timeout=8)
-        data = r.json()
-        msgArray = data.get("msgArray", [])
-        if not msgArray:
-            return None
-        d = msgArray[0]
-        price = float(d.get("z", d.get("y", 0)) or d.get("y", 0))
-        open_p = float(d.get("o", 0) or 0)
-        high = float(d.get("h", 0) or 0)
-        low = float(d.get("l", 0) or 0)
-        yesterday = float(d.get("y", 0) or 0)
-        volume = int(d.get("v", 0) or 0)
-        change = round(price - yesterday, 2)
-        change_pct = round((change / yesterday) * 100, 2) if yesterday else 0
-        name = d.get("n", stock_id)
-        result = {
-            "id": stock_id, "name": name, "price": price,
-            "open": open_p, "high": high, "low": low,
-            "yesterday": yesterday, "volume": volume,
-            "change": change, "change_pct": change_pct,
-            "market": "TWSE"
-        }
-        cache_set(f"twse_{stock_id}", result, 30)
-        return result
-    except Exception as e:
-        print(f"TWSE fetch error {stock_id}: {e}")
-        return None
+    with _twse_semaphore:
+        for attempt in range(2):
+            try:
+                url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_id}.tw&json=1&delay=0"
+                r = requests.get(url, headers=get_headers(), timeout=6)
+                r.raise_for_status()
+                data = r.json()
+                msgArray = data.get("msgArray", [])
+                if not msgArray:
+                    break
+                d = msgArray[0]
+                price = float(d.get("z", d.get("y", 0)) or d.get("y", 0))
+                if price <= 0:
+                    break
+                open_p  = float(d.get("o", 0) or 0)
+                high    = float(d.get("h", 0) or 0)
+                low     = float(d.get("l", 0) or 0)
+                yesterday = float(d.get("y", 0) or 0)
+                volume  = int(d.get("v", 0) or 0)
+                change  = round(price - yesterday, 2)
+                change_pct = round((change / yesterday) * 100, 2) if yesterday else 0
+                name    = d.get("n", TW_STOCKS_DB.get(stock_id, stock_id))
+                result  = {
+                    "id": stock_id, "name": name, "price": price,
+                    "open": open_p, "high": high, "low": low,
+                    "yesterday": yesterday, "volume": volume,
+                    "change": change, "change_pct": change_pct,
+                    "market": "TWSE"
+                }
+                cache_set(f"twse_{stock_id}", result, 30)
+                return result
+            except requests.HTTPError as e:
+                print(f"TWSE HTTP {e.response.status_code} for {stock_id}")
+                break  # 4xx/5xx 不重試
+            except Exception as e:
+                print(f"TWSE fetch error {stock_id} attempt {attempt}: {e}")
+                if attempt == 0:
+                    time.sleep(0.3 + random.random() * 0.2)  # 加隨機抖動
+
+    # 三層備援最終：yfinance
+    return fetch_tw_price_yfinance(stock_id)
 
 def fetch_tpex_price(stock_id):
-    """從櫃買中心抓即時股價"""
+    """從櫃買中心抓即時股價（含 Semaphore 速率控制）"""
     cached = cache_get(f"tpex_{stock_id}")
     if cached:
         return cached
-    try:
-        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{stock_id}.tw&json=1&delay=0"
-        r = requests.get(url, headers=HEADERS, timeout=8)
-        data = r.json()
-        msgArray = data.get("msgArray", [])
-        if not msgArray:
+    with _twse_semaphore:
+        try:
+            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{stock_id}.tw&json=1&delay=0"
+            r = requests.get(url, headers=get_headers(), timeout=6)
+            r.raise_for_status()
+            data = r.json()
+            msgArray = data.get("msgArray", [])
+            if not msgArray:
+                return None
+            d = msgArray[0]
+            price = float(d.get("z", d.get("y", 0)) or d.get("y", 0))
+            if price <= 0:
+                return None
+            yesterday = float(d.get("y", 0) or 0)
+            change = round(price - yesterday, 2)
+            change_pct = round((change / yesterday) * 100, 2) if yesterday else 0
+            result = {
+                "id": stock_id,
+                "name": d.get("n", TW_STOCKS_DB.get(stock_id, stock_id)),
+                "price": price, "yesterday": yesterday,
+                "change": change, "change_pct": change_pct,
+                "volume": int(d.get("v", 0) or 0),
+                "market": "TPEX"
+            }
+            cache_set(f"tpex_{stock_id}", result, 30)
+            return result
+        except Exception as e:
+            print(f"TPEX fetch error {stock_id}: {e}")
             return None
-        d = msgArray[0]
-        price = float(d.get("z", d.get("y", 0)) or d.get("y", 0))
-        yesterday = float(d.get("y", 0) or 0)
-        change = round(price - yesterday, 2)
-        change_pct = round((change / yesterday) * 100, 2) if yesterday else 0
-        result = {
-            "id": stock_id, "name": d.get("n", stock_id),
-            "price": price, "yesterday": yesterday,
-            "change": change, "change_pct": change_pct,
-            "volume": int(d.get("v", 0) or 0),
-            "market": "TPEX"
-        }
-        cache_set(f"tpex_{stock_id}", result, 30)
-        return result
-    except Exception as e:
-        print(f"TPEX fetch error {stock_id}: {e}")
-        return None
 
 def fetch_tw_history(stock_id, months=3):
     """用 yfinance 抓台股歷史資料（Yahoo Finance 有台股支援）"""
@@ -350,33 +464,178 @@ def get_full_indicators(stock_id, is_tw=True):
         "signals": signals
     }
 
-# ─── 股票資料庫（搜尋用） ─────────────────────────────────────
-TW_STOCKS_DB = {
-    "2330":"台積電","2317":"鴻海","2454":"聯發科","2382":"廣達","2412":"中華電",
-    "3008":"大立光","2308":"台達電","2881":"富邦金","2882":"國泰金","2886":"兆豐金",
-    "2891":"中信金","2884":"玉山金","2885":"元大金","2883":"開發金","2887":"台新金",
-    "2890":"永豐金","2892":"第一金","5880":"合庫金","2303":"聯電","2357":"華碩",
-    "2376":"技嘉","2379":"瑞昱","2395":"研華","2408":"南亞科","2409":"友達",
-    "2474":"可成","3711":"日月光投控","2344":"華邦電","2356":"英業達","2377":"微星",
-    "2385":"群光","2449":"京元電子","2458":"義隆","2498":"宏達電","2603":"長榮",
-    "2609":"陽明","2615":"萬海","2618":"長榮航","2912":"統一超","3045":"台灣大",
-    "3231":"緯創","3481":"群創","4904":"遠傳","4938":"和碩","5871":"中租-KY",
-    "6505":"台塑化","1301":"台塑","1303":"南亞","1326":"台化","0050":"元大台灣50",
-    "0056":"元大高股息","00878":"國泰永續高股息","2105":"正新","1216":"統一",
-    "1101":"台泥","1102":"亞泥","2207":"和泰車","2324":"仁寶","2347":"聯強",
-    "2353":"宏碁","3034":"聯詠","3037":"欣興","3044":"健鼎","3443":"創意",
-    "6415":"矽力-KY","6488":"環球晶","6770":"力積電","8046":"南電",
-    "2360":"致茂","2392":"正崴","2542":"興富發","2548":"華固","2633":"台灣高鐵",
-    "3661":"世芯-KY","3665":"貿聯-KY","5483":"中美晶","6176":"瑞儀",
-    "NVDA":"輝達(NVIDIA)","AAPL":"蘋果(Apple)","MSFT":"微軟(Microsoft)",
-    "TSLA":"特斯拉(Tesla)","META":"Meta","GOOGL":"谷歌(Google)",
-    "AMZN":"亞馬遜(Amazon)","AMD":"超微(AMD)","INTC":"英特爾(Intel)",
-    "TSM":"台積電ADR","AVGO":"博通(Broadcom)","QCOM":"高通(Qualcomm)",
-    "MU":"美光(Micron)","NFLX":"Netflix","DIS":"迪士尼","JPM":"摩根大通",
-    "BAC":"美國銀行","V":"Visa","MA":"Mastercard","WMT":"沃爾瑪",
-}
-
 # ─── 前端路由 ────────────────────────────────────────────────
+
+@app.route("/api/search")
+def api_search():
+    """股票搜尋（代號 + 名稱模糊查詢）"""
+    q = request.args.get("q", "").strip().upper()
+    if not q or len(q) < 1:
+        return jsonify([])
+    results = []
+    # 台股搜尋
+    for sid, name in TW_STOCKS_DB.items():
+        if q in sid or q in name.upper():
+            results.append({"id": sid, "name": name, "market": "tw"})
+    # 美股搜尋
+    for sym in US_STOCKS_SCREEN:
+        if q in sym:
+            results.append({"id": sym, "name": sym, "market": "us"})
+    return jsonify(results[:20])
+
+@app.route("/api/screen", methods=["POST"])
+def api_screen():
+    """技術指標篩選股票
+    接受條件：
+      rsi_max (int)      — RSI 上限，預設 35（超賣）
+      rsi_min (int)      — RSI 下限，預設 0
+      ma_golden (bool)   — MA5 > MA20
+      macd_golden (bool) — MACD 黃金交叉
+      kd_golden (bool)   — KD K > D
+      vol_ratio_min (float) — 量能比，預設 1.0
+      score_min (int)    — 綜合評分下限，預設 50
+      market (str)       — "tw"/"us"/"all"
+    """
+    cached = cache_get("screen_" + str(request.data))
+    if cached:
+        return jsonify(cached)
+
+    body = request.get_json() or {}
+    rsi_max       = float(body.get("rsi_max", 100))
+    rsi_min       = float(body.get("rsi_min", 0))
+    ma_golden     = body.get("ma_golden", False)
+    macd_golden   = body.get("macd_golden", False)
+    kd_golden     = body.get("kd_golden", False)
+    vol_ratio_min = float(body.get("vol_ratio_min", 0))
+    score_min     = int(body.get("score_min", 0))
+    market        = body.get("market", "tw")
+
+    results = []
+
+    def check_tw(stock_id):
+        """篩選單支台股"""
+        try:
+            price_data = fetch_twse_price(stock_id)
+            if not price_data or not price_data.get("price"):
+                price_data = fetch_tpex_price(stock_id)
+            if not price_data or not price_data.get("price"):
+                return None
+            ind = get_full_indicators(stock_id)
+            if not ind or not ind.get("RSI14"):
+                return None
+            rsi  = ind["RSI14"]
+            macd = ind["MACD"]
+            kd   = ind["KD"]
+            mas  = ind["MA"]
+            vr   = ind.get("volume_ratio", 1)
+            sc   = ind.get("score", 0)
+            price = price_data["price"]
+            ma5  = mas.get("MA5", price)
+            ma20 = mas.get("MA20", price)
+            # 套用篩選條件
+            if rsi > rsi_max: return None
+            if rsi < rsi_min: return None
+            if ma_golden   and not (ma5 > ma20): return None
+            if macd_golden and not (macd.get("cross") == "golden"): return None
+            if kd_golden   and not (kd.get("K", 0) > kd.get("D", 0)): return None
+            if vr < vol_ratio_min: return None
+            if sc < score_min: return None
+            hist = fetch_tw_history(stock_id)
+            closes = hist["closes"] if hist else []
+            return {
+                "id": stock_id,
+                "name": price_data.get("name", TW_STOCKS_DB.get(stock_id, stock_id)),
+                "market": "tw",
+                "price": price,
+                "change_pct": price_data.get("change_pct", 0),
+                "rsi": round(rsi, 1),
+                "macd_cross": macd.get("cross", "—"),
+                "kd_k": round(kd.get("K", 0), 1),
+                "kd_d": round(kd.get("D", 0), 1),
+                "ma5": round(ma5, 2),
+                "ma20": round(ma20, 2),
+                "volume_ratio": round(vr, 2),
+                "score": sc,
+                "winrate": ind.get("winrate", 60),
+                "action": ind.get("action", "觀察"),
+                "sparkline": closes[-20:] if len(closes) >= 20 else closes,
+            }
+        except Exception as e:
+            print(f"Screen TW {stock_id}: {e}")
+            return None
+
+    def check_us(sym):
+        """篩選單支美股"""
+        try:
+            data = fetch_us_stock(sym)
+            if not data: return None
+            hist = data.get("history", {})
+            closes = hist.get("closes", [])
+            if len(closes) < 20: return None
+            highs  = hist.get("highs", closes)
+            lows   = hist.get("lows", closes)
+            volumes = hist.get("volumes", [])
+            rsi  = calc_rsi(closes)
+            macd = calc_macd(closes)
+            kd   = calc_kd(highs, lows, closes)
+            mas  = calc_ma(closes)
+            price = data["price"]
+            ma5  = mas.get("MA5", price)
+            ma20 = mas.get("MA20", price)
+            avg_vol = int(np.mean(volumes[-20:])) if len(volumes) >= 20 else 1
+            vr = round(volumes[-1] / avg_vol, 2) if avg_vol else 1
+            score_items = [
+                price > ma5, price > ma20, ma5 > ma20,
+                macd["cross"] == "golden", macd["histogram"] > 0,
+                rsi < 70, rsi > 30, kd["K"] > kd["D"]
+            ]
+            sc = round(sum(score_items) / len(score_items) * 100)
+            winrate, action, signals = winrate_signal(rsi, macd["cross"], kd["K"], kd["D"], price, ma5, ma20)
+            if rsi > rsi_max: return None
+            if rsi < rsi_min: return None
+            if ma_golden   and not (ma5 > ma20): return None
+            if macd_golden and not (macd.get("cross") == "golden"): return None
+            if kd_golden   and not (kd.get("K", 0) > kd.get("D", 0)): return None
+            if vr < vol_ratio_min: return None
+            if sc < score_min: return None
+            return {
+                "id": sym, "name": data.get("name", sym),
+                "market": "us", "price": price,
+                "change_pct": data.get("change_pct", 0),
+                "rsi": round(rsi, 1),
+                "macd_cross": macd.get("cross", "—"),
+                "kd_k": round(kd.get("K", 0), 1),
+                "kd_d": round(kd.get("D", 0), 1),
+                "ma5": round(ma5, 2), "ma20": round(ma20, 2),
+                "volume_ratio": round(vr, 2),
+                "score": sc, "winrate": winrate, "action": action,
+                "sparkline": closes[-20:],
+            }
+        except Exception as e:
+            print(f"Screen US {sym}: {e}")
+            return None
+
+    # 並行篩選
+    tasks = []
+    if market in ("tw", "all"):
+        tasks += [(check_tw, sid) for sid in TW_STOCKS_DB.keys()]
+    if market in ("us", "all"):
+        tasks += [(check_us, sym) for sym in US_STOCKS_SCREEN]
+
+    max_workers = 6 if market == "tw" else 10
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(fn, s) for fn, s in tasks]
+        for future in as_completed(futures, timeout=30):
+            try:
+                r = future.result(timeout=25)
+                if r:
+                    results.append(r)
+            except Exception as e:
+                print(f"Screen future: {e}")
+
+    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    cache_set("screen_" + str(body), results, 120)  # 2分鐘快取
+    return jsonify(results)
 
 @app.route("/")
 def index():
@@ -384,20 +643,6 @@ def index():
     return send_from_directory(BASE_DIR, "quant-trading-live.html")
 
 # ─── API 路由 ────────────────────────────────────────────────
-
-@app.route("/api/search")
-def api_search():
-    """股票搜尋（代號 + 名稱）"""
-    q = request.args.get("q", "").strip()
-    if len(q) < 1:
-        return jsonify([])
-    q_upper = q.upper()
-    results = []
-    for code, name in TW_STOCKS_DB.items():
-        if q_upper in code or q in name or q_upper in name.upper():
-            is_us = not code.replace(".", "").isdigit() and len(code) <= 5
-            results.append({"id": code, "name": name, "market": "us" if is_us else "tw"})
-    return jsonify(results[:12])
 
 @app.route("/api/health")
 def health():
@@ -482,56 +727,80 @@ def api_history(stock_id):
 
 @app.route("/api/monitor", methods=["POST"])
 def api_monitor():
-    """批次查詢監控清單"""
+    """批次查詢監控清單（並行抓取，30秒快取，三層備援）"""
     body = request.get_json()
     stocks = body.get("stocks", [])
-    results = []
-    for s in stocks:
+    if not stocks:
+        return jsonify([])
+
+    # 30秒快取（key 依股票清單）
+    cache_key = "monitor_" + "_".join(s.get("id", "") for s in stocks)
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
+    def fetch_one(s):
         stock_id = s.get("id", "")
         market = s.get("market", "tw")
         try:
             if market == "us":
                 data = fetch_us_stock(stock_id.upper())
             else:
+                # 三層備援：TWSE → TPEX → yfinance
                 data = fetch_twse_price(stock_id)
                 if not data:
                     data = fetch_tpex_price(stock_id)
+                if not data:
+                    data = fetch_tw_price_yfinance(stock_id)
             if data:
-                # 快速指標
                 ind = get_full_indicators(stock_id) if market == "tw" else {}
                 data["quick_signal"] = ind.get("action", "觀察")
                 data["winrate"] = ind.get("winrate", 60)
-                results.append(data)
+                return data
         except Exception as e:
             print(f"Monitor error {stock_id}: {e}")
+        return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(fetch_one, s): s for s in stocks}
+        for future in as_completed(futures, timeout=20):
+            try:
+                r = future.result(timeout=15)
+                if r:
+                    results.append(r)
+            except Exception as e:
+                print(f"Monitor future error: {e}")
+
+    if results:
+        cache_set(cache_key, results, 30)
     return jsonify(results)
 
 @app.route("/api/recommend")
 def api_recommend():
-    """今日推薦股票（台股 + 美股各3檔，依技術指標評分排序）"""
+    """今日推薦股票（台股 + 美股，並行抓取，10分鐘快取）"""
     cached = cache_get("recommend")
     if cached:
         return jsonify(cached)
 
-    tw_candidates = ["2330", "2317", "2454", "2382", "2412", "3008", "6505", "0050", "2308", "2303", "2881", "3034"]
-    us_candidates = ["NVDA", "TSLA", "AAPL", "MSFT", "META", "AMD", "AVGO"]
+    tw_candidates = ["2330", "2317", "2454", "2382", "2412", "3008", "6505", "0050", "2881", "2882"]
+    us_candidates = ["NVDA", "TSLA", "AAPL", "MSFT", "META"]
     results = []
 
-    for stock_id in tw_candidates[:8]:
+    def fetch_tw(stock_id):
         try:
             price_data = fetch_twse_price(stock_id)
             if not price_data or not price_data.get("price"):
-                continue
+                return None
             ind = get_full_indicators(stock_id)
             if not ind:
-                continue
+                return None
             hist = fetch_tw_history(stock_id)
             closes = hist["closes"] if hist else []
             price = price_data["price"]
-            ma20 = ind["MA"].get("MA20", price)
             target = round(price * 1.08, 0)
             stop_loss = round(price * 0.95, 0)
-            results.append({
+            return {
                 "id": stock_id,
                 "name": price_data["name"],
                 "market": "TW",
@@ -546,19 +815,20 @@ def api_recommend():
                 "rsi": ind.get("RSI14", 50),
                 "macd_cross": ind["MACD"].get("cross", ""),
                 "sparkline": closes[-20:] if len(closes) >= 20 else closes
-            })
+            }
         except Exception as e:
             print(f"Recommend TW error {stock_id}: {e}")
+            return None
 
-    for sym in us_candidates[:4]:
+    def fetch_us(sym):
         try:
             data = fetch_us_stock(sym)
             if not data:
-                continue
+                return None
             hist = data.get("history", {})
             closes = hist.get("closes", [])
             if len(closes) < 20:
-                continue
+                return None
             price = data["price"]
             rsi = calc_rsi(closes)
             macd = calc_macd(closes)
@@ -567,7 +837,7 @@ def api_recommend():
             ma5 = mas.get("MA5", price)
             ma20 = mas.get("MA20", price)
             winrate, action, signals = winrate_signal(rsi, macd["cross"], kd["K"], kd["D"], price, ma5, ma20)
-            results.append({
+            return {
                 "id": sym,
                 "name": data["name"],
                 "market": "US",
@@ -581,13 +851,26 @@ def api_recommend():
                 "signals": signals,
                 "rsi": rsi,
                 "sparkline": closes[-20:]
-            })
+            }
         except Exception as e:
             print(f"Recommend US error {sym}: {e}")
+            return None
+
+    # 並行抓取台股 + 美股
+    all_tasks = [(fetch_tw, s) for s in tw_candidates[:8]] + [(fetch_us, s) for s in us_candidates[:4]]
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        futures = [ex.submit(fn, s) for fn, s in all_tasks]
+        for future in as_completed(futures, timeout=25):
+            try:
+                r = future.result(timeout=20)
+                if r:
+                    results.append(r)
+            except Exception as e:
+                print(f"Recommend future error: {e}")
 
     # 依評分排序
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
-    cache_set("recommend", results, 300)
+    cache_set("recommend", results, 600)  # 10分鐘快取
     return jsonify(results)
 
 @app.route("/api/news/<stock_id>")

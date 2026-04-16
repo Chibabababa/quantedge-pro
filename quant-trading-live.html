@@ -240,6 +240,31 @@ select option{background:var(--bg2)}
 .stratlib-name{font-size:12px;font-weight:600;color:var(--text);margin-bottom:3px}
 .stratlib-desc{font-size:10px;color:var(--text3);line-height:1.5}
 
+/* ── 篩選器 ─────────────────────────────────────────── */
+.cond-chip{background:rgba(0,0,0,.25);border:1px solid var(--border2);border-radius:9px;padding:11px 13px;transition:border-color .2s}
+.cond-chip:has(input[type="checkbox"]:checked){border-color:rgba(0,200,150,.45);background:rgba(0,200,150,.04)}
+.chip-toggle{position:relative;display:inline-block;width:32px;height:18px;flex-shrink:0}
+.chip-toggle input{opacity:0;width:0;height:0}
+.chip-slider{position:absolute;inset:0;background:rgba(255,255,255,.12);border-radius:18px;cursor:pointer;transition:.2s}
+.chip-slider:before{content:'';position:absolute;width:12px;height:12px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.chip-toggle input:checked+.chip-slider{background:var(--accent)}
+.chip-toggle input:checked+.chip-slider:before{transform:translateX(14px)}
+.screen-card{background:rgba(0,0,0,.28);border:1px solid var(--border2);border-radius:9px;padding:13px 14px;transition:border-color .18s;cursor:pointer}
+.screen-card:hover{border-color:var(--accent)}
+.screen-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.screen-card-name{font-size:13px;font-weight:700;color:var(--text)}
+.screen-card-id{font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace}
+.screen-card-price{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
+.screen-card-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px}
+.screen-card-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px}
+.screen-card-stat{text-align:center}
+.screen-card-stat .sv{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700}
+.screen-card-stat .sl{font-size:9px;color:var(--text3)}
+.btn-add-mon{width:100%;padding:6px;background:rgba(0,200,150,.12);border:1px solid rgba(0,200,150,.3);color:var(--accent);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all .18s;letter-spacing:.5px}
+.btn-add-mon:hover{background:rgba(0,200,150,.22);border-color:var(--accent)}
+.btn-add-mon.added{background:rgba(0,200,150,.25);color:#fff;border-color:var(--accent)}
+.screen-sparkline{width:100%;height:28px;display:block;margin-bottom:8px}
+
 </style>
 </head>
 <body>
@@ -330,6 +355,118 @@ select option{background:var(--bg2)}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="runBacktest()">▶ 執行回測</button>
       <button class="btn btnp btn-sm" onclick="saveStrat()">💾 儲存策略</button>
+    </div>
+  </div>
+
+  <!-- ══ 技術指標股票篩選器 ══════════════════════════════════ -->
+  <div class="card mb16" style="border-color:rgba(0,200,150,.25);background:linear-gradient(135deg,rgba(0,200,150,.04),rgba(0,0,0,0))">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div>
+        <div class="ctitle" style="color:var(--accent)">🔍 技術指標篩選器 <span class="badge">選出符合條件的股票</span></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">勾選條件 → 開始篩選 → 符合標的加入監控</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="screenMarket" style="width:90px;font-size:11px">
+          <option value="tw">台股</option>
+          <option value="us">美股</option>
+          <option value="all">全部</option>
+        </select>
+        <button class="btn btnp btn-sm" onclick="runScreen()" id="screenBtn">🔍 開始篩選</button>
+      </div>
+    </div>
+    <!-- 篩選條件列 -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:14px">
+      <!-- RSI -->
+      <div class="cond-chip" id="chip-rsi">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-rsi" checked onchange="toggleChip('rsi')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--blue)">⚡ RSI 區間</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
+              <span style="font-size:10px;color:var(--text3)">最小</span>
+              <input type="number" id="rsi-min" value="20" min="0" max="100" style="width:42px;font-size:11px">
+              <span style="font-size:10px;color:var(--text3)">—最大</span>
+              <input type="number" id="rsi-max" value="40" min="0" max="100" style="width:42px;font-size:11px">
+            </div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:5px">20–40 = 超賣區，適合尋底反彈</div>
+      </div>
+      <!-- MA 黃金交叉 -->
+      <div class="cond-chip" id="chip-ma">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-ma" onchange="toggleChip('ma')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--accent)">📊 MA 黃金交叉</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">MA5 &gt; MA20（短線多頭）</div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:5px">短期均線高於中期均線</div>
+      </div>
+      <!-- MACD -->
+      <div class="cond-chip" id="chip-macd">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-macd" onchange="toggleChip('macd')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--purple)">📈 MACD 黃金交叉</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">DIF &gt; DEA（動能翻多）</div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:5px">動能指標轉強訊號</div>
+      </div>
+      <!-- KD -->
+      <div class="cond-chip" id="chip-kd">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-kd" onchange="toggleChip('kd')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--yellow)">🔗 KD 黃金交叉</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">K 值 &gt; D 值（隨機多頭）</div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:5px">KD 轉強，短線反彈機率高</div>
+      </div>
+      <!-- 量能 -->
+      <div class="cond-chip" id="chip-vol">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-vol" onchange="toggleChip('vol')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--red)">📦 量能放大</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
+              <span style="font-size:10px;color:var(--text3)">均量倍數 &gt;</span>
+              <input type="number" id="vol-ratio" value="1.2" min="0.5" max="5" step="0.1" style="width:50px;font-size:11px">
+              <span style="font-size:10px;color:var(--text3)">倍</span>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:5px">成交量突破均量，買盤積極</div>
+      </div>
+      <!-- 評分 -->
+      <div class="cond-chip" id="chip-score">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-score" onchange="toggleChip('score')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--accent)">🏆 綜合評分</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
+              <span style="font-size:10px;color:var(--text3)">評分 ≥</span>
+              <input type="number" id="score-min" value="60" min="0" max="100" style="width:50px;font-size:11px">
+              <span style="font-size:10px;color:var(--text3)">分</span>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:5px">多指標綜合評估（滿分100）</div>
+      </div>
+    </div>
+    <!-- 篩選結果 -->
+    <div id="screenResult" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:600;color:var(--accent)">篩選結果 <span id="screenCount" class="badge">0 檔</span></div>
+        <button class="btn btn-sm" onclick="addAllToMonitor()" style="font-size:11px">＋ 全部加入監控</button>
+      </div>
+      <div id="screenGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px"></div>
+    </div>
+    <div id="screenLoading" style="display:none;text-align:center;padding:24px">
+      <div class="spinner" style="margin:0 auto 10px"></div>
+      <div style="font-size:12px;color:var(--text3)">正在用技術指標掃描股票庫，約需 15–30 秒…</div>
     </div>
   </div>
 
@@ -818,6 +955,161 @@ function loadMonitorLS(){try{const s=localStorage.getItem('qe_mon');return s?JSO
 function saveMonitor(){try{localStorage.setItem('qe_mon',JSON.stringify(monitorStocks));}catch(e){}}
 function removeFromMonitor(id){monitorStocks=monitorStocks.filter(s=>s.id!==id);saveMonitor();loadMonitor();}
 let monitorStocks=loadMonitorLS();
+
+// ── 加入監控（全站通用） ──────────────────────────
+function addToMonitor(id, market, btnEl){
+  id=String(id).trim().toUpperCase();
+  if(monitorStocks.find(s=>s.id.toUpperCase()===id)){
+    if(btnEl){btnEl.textContent='✓ 已在監控';btnEl.classList.add('added');}
+    return;
+  }
+  monitorStocks.push({id: market==='us'?id:id.toLowerCase().padStart?id:id, market});
+  saveMonitor();
+  if(btnEl){btnEl.textContent='✓ 已加入監控';btnEl.classList.add('added');btnEl.disabled=true;}
+  // 如果目前在監控頁面，立刻刷新
+  if(document.getElementById('page-monitor').classList.contains('active')) loadMonitor();
+}
+
+// ── 篩選器：Chip toggle UI ────────────────────────
+function toggleChip(name){
+  const ck=document.getElementById('ck-'+name);
+  const chip=document.getElementById('chip-'+name);
+  if(ck&&chip) chip.style.opacity=ck.checked?'1':'0.45';
+}
+
+// ── 篩選器：開始篩選 ─────────────────────────────
+let _screenResults=[];
+async function runScreen(){
+  const btn=$('screenBtn');
+  const loading=$('screenLoading');
+  const result=$('screenResult');
+  btn.disabled=true; btn.textContent='篩選中…';
+  loading.style.display='block';
+  result.style.display='none';
+  _screenResults=[];
+  try{
+    const body={
+      market: $('screenMarket').value,
+    };
+    if($('ck-rsi').checked){
+      body.rsi_min=Number($('rsi-min').value||0);
+      body.rsi_max=Number($('rsi-max').value||100);
+    }
+    if($('ck-ma').checked)   body.ma_golden=true;
+    if($('ck-macd').checked) body.macd_golden=true;
+    if($('ck-kd').checked)   body.kd_golden=true;
+    if($('ck-vol').checked)  body.vol_ratio_min=Number($('vol-ratio').value||1);
+    if($('ck-score').checked) body.score_min=Number($('score-min').value||0);
+
+    const res=await fetch(`${API}/screen`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    const data=await res.json();
+    _screenResults=data||[];
+    renderScreenResults(_screenResults);
+  }catch(e){
+    console.error('Screen error',e);
+    $('screenGrid').innerHTML='<div style="color:var(--red);font-size:12px;padding:12px">篩選失敗，請確認伺服器連線</div>';
+    result.style.display='block';
+  }finally{
+    loading.style.display='none';
+    btn.disabled=false; btn.textContent='🔍 開始篩選';
+  }
+}
+
+function renderScreenResults(data){
+  const grid=$('screenGrid');
+  const result=$('screenResult');
+  $('screenCount').textContent=data.length+' 檔';
+  result.style.display='block';
+  if(!data.length){
+    grid.innerHTML='<div style="color:var(--text3);font-size:12px;padding:16px;text-align:center;grid-column:1/-1">沒有符合條件的股票，試著放寬篩選條件</div>';
+    return;
+  }
+  grid.innerHTML=data.map(s=>{
+    const chgClass=s.change_pct>0?'up':s.change_pct<0?'dn':'';
+    const chgStr=s.change_pct>0?`+${s.change_pct.toFixed(2)}%`:`${s.change_pct.toFixed(2)}%`;
+    const alreadyIn=monitorStocks.find(m=>m.id.toUpperCase()===s.id.toUpperCase());
+    const inMon=alreadyIn?'added':'';
+    const inMonTxt=alreadyIn?'✓ 已在監控':'＋ 加入監控';
+    // 指標 badge
+    const badges=[];
+    if(s.macd_cross==='golden') badges.push('<span class="tag tg" style="font-size:9px">MACD金叉</span>');
+    if(s.kd_k>s.kd_d)           badges.push('<span class="tag tg" style="font-size:9px">KD金叉</span>');
+    if(s.ma5>s.ma20)             badges.push('<span class="tag tg" style="font-size:9px">MA多頭</span>');
+    if(s.rsi<35)                  badges.push('<span class="tag tb" style="font-size:9px">RSI超賣</span>');
+    if(s.volume_ratio>1.5)        badges.push('<span class="tag ty" style="font-size:9px">量增</span>');
+    const action=s.action||'觀察';
+    const actClass=action.includes('買')?'tg':action.includes('賣')?'tr':'ty';
+    return `<div class="screen-card" onclick="openStockModal('${s.id}','${s.market}')">
+      <div class="screen-card-top">
+        <div>
+          <div class="screen-card-name">${s.name}</div>
+          <div class="screen-card-id">${s.market==='tw'?'TW':'US'} · ${s.id.toUpperCase()}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="screen-card-price ${chgClass}">${s.price.toLocaleString()}</div>
+          <div style="font-size:10px" class="${chgClass}">${chgStr}</div>
+        </div>
+      </div>
+      ${s.sparkline&&s.sparkline.length?`<canvas class="screen-sparkline" id="spk-${s.id}" height="28"></canvas>`:''}
+      <div class="screen-card-tags">${badges.join('')}<span class="tag ${actClass}" style="font-size:9px">${action}</span></div>
+      <div class="screen-card-bar">
+        <div class="screen-card-stat"><div class="sv" style="color:var(--blue)">${s.rsi??'—'}</div><div class="sl">RSI</div></div>
+        <div class="screen-card-stat"><div class="sv" style="color:var(--yellow)">${s.score??'—'}</div><div class="sl">評分</div></div>
+        <div class="screen-card-stat"><div class="sv" style="color:var(--accent)">${s.winrate??'—'}%</div><div class="sl">勝率</div></div>
+      </div>
+      <button class="btn-add-mon ${inMon}" id="addbtn-${s.id}" onclick="event.stopPropagation();addToMonitor('${s.id}','${s.market}',this)" ${alreadyIn?'disabled':''}>${inMonTxt}</button>
+    </div>`;
+  }).join('');
+  // 繪製 sparkline
+  data.forEach(s=>{
+    if(!s.sparkline||!s.sparkline.length) return;
+    const cv=document.getElementById('spk-'+s.id);
+    if(!cv) return;
+    drawSparkline(cv,s.sparkline);
+  });
+}
+
+function addAllToMonitor(){
+  let added=0;
+  _screenResults.forEach(s=>{
+    if(!monitorStocks.find(m=>m.id.toUpperCase()===s.id.toUpperCase())){
+      monitorStocks.push({id:s.id,market:s.market});
+      added++;
+      const btn=document.getElementById('addbtn-'+s.id);
+      if(btn){btn.textContent='✓ 已加入監控';btn.classList.add('added');btn.disabled=true;}
+    }
+  });
+  saveMonitor();
+  if(added>0 && document.getElementById('page-monitor').classList.contains('active')) loadMonitor();
+}
+
+function drawSparkline(canvas, data){
+  const w=canvas.offsetWidth||280, h=28;
+  canvas.width=w; canvas.height=h;
+  const ctx=canvas.getContext('2d');
+  if(!data||data.length<2) return;
+  const mn=Math.min(...data), mx=Math.max(...data);
+  const range=mx-mn||1;
+  const pts=data.map((v,i)=>[(i/(data.length-1))*w, h-((v-mn)/range)*(h-2)-1]);
+  const isUp=data[data.length-1]>=data[0];
+  const grad=ctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,isUp?'rgba(0,200,150,.35)':'rgba(255,77,109,.35)');
+  grad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0],pts[0][1]);
+  pts.forEach(p=>ctx.lineTo(p[0],p[1]));
+  ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0],pts[0][1]);
+  pts.forEach(p=>ctx.lineTo(p[0],p[1]));
+  ctx.strokeStyle=isUp?'#00c896':'#ff4d6d';
+  ctx.lineWidth=1.5;ctx.stroke();
+}
 let selectedMonStock = null;
 let btResults = {};  // 儲存各策略回測結果
 
@@ -1451,6 +1743,8 @@ window.addEventListener('load',async()=>{
     startAutoRefresh();
   }
   setInterval(()=>checkServer(),30000);
+  // Keep-alive：每14分鐘ping一次，防止Render免費版休眠
+  setInterval(()=>fetch(`${API}/health`).catch(()=>{}), 14*60*1000);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')closeStockModal();});
   window.addEventListener('resize',()=>{
     const active=document.querySelector('.page.active');
