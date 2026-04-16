@@ -225,12 +225,12 @@ def calc_backtest_winrate(closes, highs=None, lows=None,
     """真實回測勝率計算（與 api_backtest 相同策略邏輯）
 
     輸入歷史收盤/高/低價序列，模擬策略進出場，
-    回傳歷史勝率(%)。交易次數不足5次時回傳預設值60。
+    回傳歷史勝率(%)。歷史或交易次數不足時回傳 None（不產生假數據）。
     """
     closes_arr = np.array(closes, dtype=float)
     n = len(closes_arr)
     if n < 30:
-        return 60.0
+        return None
     highs_arr  = np.array(highs,  dtype=float) if highs  else closes_arr.copy()
     lows_arr   = np.array(lows,   dtype=float) if lows   else closes_arr.copy()
 
@@ -286,7 +286,7 @@ def calc_backtest_winrate(closes, highs=None, lows=None,
                 in_trade = False
 
     if trades < 5:
-        return 60.0
+        return None  # 交易次數不足，無法產生可信勝率
     return round(float(np.clip(wins / trades * 100, 25, 92)), 1)
 
 
@@ -298,10 +298,12 @@ def winrate_signal(rsi, macd_cross, k, d, price, ma5, ma20,
     否則退回多因子啟發式估算（快速但較不精準）。
     """
     # ── 真實回測路徑 ──────────────────────────────
+    winrate = None
     if closes and len(closes) >= 30:
         winrate = calc_backtest_winrate(closes, highs, lows, strategy)
-    else:
-        # ── 啟發式備援 ───────────────────────────
+
+    # ── 啟發式備援（真實回測資料不足時使用）────────
+    if winrate is None:
         score = 0
         if rsi < 30:   score += 20
         elif rsi < 45: score += 10
@@ -1140,8 +1142,8 @@ def api_recommend():
                 "change_pct": price_data.get("change_pct", 0),
                 "target": target,
                 "stop_loss": stop_loss,
-                "score": ind.get("score", 60),
-                "winrate": ind.get("winrate", 60),
+                "score": ind.get("score"),   # None = 資料不足，前端顯示 —
+                "winrate": ind.get("winrate"),
                 "action": ind.get("action", "觀察"),
                 "signals": ind.get("signals", []),
                 "rsi": ind.get("RSI14", 50),
@@ -1297,13 +1299,7 @@ def api_strategy_winrate():
     # 用 0050 ETF（最具代表性、流動性最好）
     hist = fetch_tw_history("0050", months=12)
     if not hist or len(hist["closes"]) < 60:
-        # 備援：直接回傳預估值
-        return jsonify({
-            "MA_RSI":  {"winrate": 62, "trades": 0},
-            "MACD":    {"winrate": 58, "trades": 0},
-            "KD_RSI":  {"winrate": 55, "trades": 0},
-            "TRIPLE":  {"winrate": 65, "trades": 0},
-        })
+        return jsonify({"error": "history_unavailable"}), 503
 
     closes = hist["closes"]
     highs  = hist.get("highs", closes)
@@ -1317,7 +1313,7 @@ def api_strategy_winrate():
         ("TRIPLE",  0.06, 0.18),
     ]:
         wr = calc_backtest_winrate(closes, highs, lows, strat, sl, tp)
-        result[strat] = {"winrate": wr}
+        result[strat] = {"winrate": wr}  # wr 可能為 None（資料不足）
 
     cache_set("strategy_winrate_all", result, 3600)  # 1 小時快取
     return jsonify(result)

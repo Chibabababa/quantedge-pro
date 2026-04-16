@@ -982,8 +982,12 @@ async function openStockModal(id,market){
       <div class="sd-ind-row"><span class="sd-ind-name">布林下</span><span class="sd-ind-val">$${fmtN(BB.lower)}</span>${s2(price>BB.lower)}</div>
       <div class="sd-ind-row"><span class="sd-ind-name">量能比</span><span class="sd-ind-val">${fmt(ind.volume_ratio)}x</span>${s2(ind.volume_ratio>1)}</div>
       <div class="sd-ind-row"><span class="sd-ind-name">ATR(14)</span><span class="sd-ind-val">${fmt(atr)}</span><span style="background:rgba(76,201,240,.12);color:var(--blue);font-size:10px;padding:2px 7px;border-radius:3px">波動</span></div>`;
-    $('sd-advice').innerHTML=`訊號：<strong style="color:var(--accent)">${ind.action||'觀察'}</strong> · 勝率 <strong style="color:var(--accent)">${ind.winrate||60}%</strong><br>
-      <span style="font-size:11px">進場 <span class="mono" style="color:var(--accent)">$${fmtN(price)}</span> · 目標 <span class="mono" style="color:var(--accent)">$${fmtN(Math.round(price*1.08))}</span> · 停損 <span class="mono" style="color:var(--red)">$${fmtN(Math.round(price*0.95))}</span></span>`;
+    const _wr=ind.winrate!=null?ind.winrate+'%':'—';
+    const _atr=ind.ATR14&&ind.ATR14>0?ind.ATR14:price*0.03;
+    const _tgt=fmtN(Math.round((price+_atr*2)*10)/10);
+    const _sl=fmtN(Math.round((price-_atr*1.5)*10)/10);
+    $('sd-advice').innerHTML=`訊號：<strong style="color:var(--accent)">${ind.action||'觀察'}</strong> · 勝率 <strong style="color:var(--accent)">${_wr}</strong><br>
+      <span style="font-size:11px">進場 <span class="mono" style="color:var(--accent)">$${fmtN(price)}</span> · 目標 <span class="mono" style="color:var(--accent)">$${_tgt}</span> · 停損 <span class="mono" style="color:var(--red)">$${_sl}</span></span>`;
     loadModalNews(id);
   }catch(e){$('sd-ind-list').innerHTML='<div style="color:var(--text3);text-align:center;padding:20px;font-size:12px">⚠ 無法取得數據</div>';}
 }
@@ -1050,24 +1054,31 @@ function initStratLib(){
     </div>`).join('');
   // 非同步拉取真實勝率
   fetch(`${API}/strategy_winrate`).then(r=>r.ok?r.json():null).then(data=>{
-    if(!data) return;
+    if(!data||data.error){
+      // API 失敗或歷史不足：顯示「—」，不顯示假數字
+      STRATEGY_LIB.forEach((_,i)=>{
+        const el=$('stlib-wr-'+i);
+        if(el){el.textContent='—';el.style.color='var(--text3)';el.style.fontSize='14px';}
+      });
+      return;
+    }
     STRATEGY_LIB.forEach((s,i)=>{
       const d=data[s.strategy];
-      if(d){
+      const el=$('stlib-wr-'+i);
+      if(!el) return;
+      if(d && d.winrate!=null){
         const wr=d.winrate;
-        const el=$('stlib-wr-'+i);
-        if(el){
-          el.textContent=wr+'%';
-          el.style.color=wr>=60?'var(--accent)':wr>=50?'var(--yellow)':'var(--red)';
-          el.style.fontSize='';
-        }
+        el.textContent=wr+'%';
+        el.style.color=wr>=60?'var(--accent)':wr>=50?'var(--yellow)':'var(--red)';
+        el.style.fontSize='';
+      } else {
+        el.textContent='—'; el.style.color='var(--text3)'; el.style.fontSize='14px';
       }
     });
   }).catch(()=>{
-    // 失敗時顯示估計值
-    STRATEGY_LIB.forEach((s,i)=>{
+    STRATEGY_LIB.forEach((_,i)=>{
       const el=$('stlib-wr-'+i);
-      if(el){el.textContent=s.wr.split('~')[0]+'%';}
+      if(el){el.textContent='—';el.style.color='var(--text3)';el.style.fontSize='14px';}
     });
   });
 }
@@ -1570,7 +1581,8 @@ function drawEquityCurve(canvasId,equity){
 function renderSignals(data){
   if(!data||data.length===0){ $('signalList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px;grid-column:1/-1">暫無推薦</div>'; return; }
   $('signalList').innerHTML=data.slice(0,10).map(s=>{
-    const chg=s.change_pct||0;const wr=s.winrate||60;
+    const chg=s.change_pct||0;
+    const wr=s.winrate!=null?s.winrate:null;
     return `<div class="rec10-item" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
         <div><div style="font-family:Rajdhani;font-size:16px;font-weight:700;color:var(--accent2)">${s.id}</div><div style="font-size:10px;color:var(--text3)">${s.name||''}</div></div>
@@ -1580,10 +1592,10 @@ function renderSignals(data){
         <span style="font-family:JetBrains Mono;font-size:13px" class="${chgClass(chg)}">$${fmtN(s.price)}</span>
         <span style="font-family:JetBrains Mono;font-size:11px" class="${chgClass(chg)}">${chgStr(chg)}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+      ${wr!=null?`<div style="display:flex;align-items:center;gap:5px;margin-top:6px">
         <div class="pbar" style="flex:1"><div class="pfill g" style="width:${wr}%"></div></div>
         <span style="font-size:10px;color:var(--accent);font-family:JetBrains Mono">${wr}%</span>
-      </div>
+      </div>`:'<div style="font-size:10px;color:var(--text3);margin-top:6px">勝率計算中…</div>'}
     </div>`;
   }).join('');
   $('signalTime').textContent=new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
@@ -1594,14 +1606,14 @@ function renderMarketTable(data){
   if(!data||data.length===0){ $('marketTbody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">無數據</td></tr>'; return; }
   $('marketTbody').innerHTML=data.map(s=>{
     const chg=s.change_pct||0;
-    const wr=s.winrate||60;
+    const wr=s.winrate!=null?s.winrate:null;
     return `<tr style="cursor:pointer" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')">
       <td><span class="mono" style="color:var(--accent2)">${s.id}</span> ${s.name||''} <span class="tag ${s.market==='US'?'tb':'tg'}" style="font-size:9px">${s.market}</span></td>
       <td class="mono">$${fmtN(s.price)}</td>
       <td class="mono ${chgClass(chg)}">${s.change>0?'+':''}${fmt(s.change)}</td>
       <td class="mono ${chgClass(chg)}">${chgStr(chg)}</td>
       <td>${signal2tag(s.quick_signal)}</td>
-      <td><div style="display:flex;align-items:center;gap:6px"><div class="pbar" style="width:60px"><div class="pfill g" style="width:${wr}%"></div></div><span style="font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace">${wr}%</span></div></td>
+      <td>${wr!=null?`<div style="display:flex;align-items:center;gap:6px"><div class="pbar" style="width:60px"><div class="pfill g" style="width:${wr}%"></div></div><span style="font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace">${wr}%</span></div>`:'<span style="color:var(--text3);font-size:11px">—</span>'}</td>
     </tr>`;
   }).join('');
 }
@@ -1791,8 +1803,8 @@ async function loadRecommend(){
     if(!data||data.length===0){ $('recCards').innerHTML='<div style="color:var(--text3);padding:40px;text-align:center">無推薦數據，請確認伺服器正常運行</div>'; return; }
     $('recCards').innerHTML=data.map(s=>{
       const chg=s.change_pct||0;
-      const score=s.score||60;
-      const wr=s.winrate||60;
+      const score=s.score!=null?s.score:null;
+      const wr=s.winrate!=null?s.winrate:null;
       const sigs=(s.signals||[]).slice(0,3).map(sg=>`<span class="tag tg" style="font-size:10px">${sg}</span>`).join('');
       const mktTag=s.market==='US'?'<span class="tag tb" style="font-size:9px">🇺🇸 美股</span>':'<span class="tag tg" style="font-size:9px">🇹🇼 台股</span>';
       return `<div class="rcard" style="cursor:pointer" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')">
@@ -1806,8 +1818,7 @@ async function loadRecommend(){
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <span style="font-size:10px;color:var(--text3)">評分</span>
-            <div class="pbar" style="flex:1"><div class="pfill g" style="width:${score}%"></div></div>
-            <span class="mono" style="font-size:12px;color:var(--accent)">${score}</span>
+            ${score!=null?`<div class="pbar" style="flex:1"><div class="pfill g" style="width:${score}%"></div></div><span class="mono" style="font-size:12px;color:var(--accent)">${score}</span>`:`<span style="font-size:12px;color:var(--text3)">計算中…</span>`}
           </div>
           <div style="display:flex;gap:5px;flex-wrap:wrap">${sigs}</div>
         </div>
@@ -1822,7 +1833,7 @@ async function loadRecommend(){
               <div style="font-size:10px;color:var(--text3)">停損 $${fmtN(s.stop_loss)}</div>
             </div>
             <div style="text-align:right"><div style="font-size:9px;color:var(--text3)">勝率</div>
-              <div style="font-family:Rajdhani;font-size:20px;font-weight:700;color:var(--accent)">${wr}%</div>
+              <div style="font-family:Rajdhani;font-size:20px;font-weight:700;color:var(--accent)">${wr!=null?wr+'%':'—'}</div>
             </div>
           </div>
           <div id="news-${s.id}" style="font-size:11px;color:var(--text3)">新聞載入中...</div>
@@ -1915,11 +1926,11 @@ async function loadTechStock(){
       <div class="indrow"><span class="indname">BB 下軌</span><span class="indval">$${fmtN(BB.lower)}</span>${ind2sig(price>BB.lower)}</div>
       <div class="indrow"><span class="indname">量能比</span><span class="indval">${fmt(ind.volume_ratio)}x</span>${ind2sig(ind.volume_ratio>1)}</div>
       <div class="indrow" style="border:none"><span class="indname">ATR(14)</span><span class="indval">${fmt(atr)}</span><span class="indsig neutral">波動</span></div>`;
-    const score=ind.score||50;
-    const wr=ind.winrate||60;
+    const score=ind.score!=null?ind.score:null;
+    const wr=ind.winrate!=null?ind.winrate:null;
     const action=ind.action||'觀察';
-    $('techScore').textContent=score;
-    $('techWinrate').textContent=wr+'%';
+    $('techScore').textContent=score!=null?score:'—';
+    $('techWinrate').textContent=wr!=null?wr+'%':'—';
     $('techATR').textContent=fmt(atr);
     $('techAction').innerHTML=signal2tag(action);
     // Item9: ATR 動態目標價（取代固定百分比）
