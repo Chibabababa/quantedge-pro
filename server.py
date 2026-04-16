@@ -642,6 +642,14 @@ def index():
     """Serve 前端主頁面"""
     return send_from_directory(BASE_DIR, "quant-trading-live.html")
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(BASE_DIR, "favicon.ico", mimetype="image/x-icon")
+
+@app.route("/logo.png")
+def logo():
+    return send_from_directory(BASE_DIR, "logo.png", mimetype="image/png")
+
 # ─── API 路由 ────────────────────────────────────────────────
 
 @app.route("/api/health")
