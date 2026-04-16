@@ -1388,32 +1388,64 @@ async function loadDashboard(){
 
 // ── Monitor 載入 ─────────────────────────────────
 async function loadMonitor(){
-  $('monitorList').innerHTML='<div class="loading"><div class="spinner"></div>載入中...</div>';
+  const list=$('monitorList');
   $('monBadge').textContent=`${monitorStocks.length} 檔`;
+  $('ms-count').textContent=monitorStocks.length+' 檔';
+
+  // 1. 立即顯示骨架列（代號+名稱已知，價格等 API 回來再填）
+  const NAMES={
+    '2330':'台積電','2317':'鴻海','2454':'聯發科','3008':'大立光',
+    '0050':'元大50','2412':'中華電','2382':'廣達','2881':'富邦金',
+    '2882':'國泰金','2891':'中信金','2886':'兆豐金','6505':'台塑化',
+    'NVDA':'NVIDIA','AAPL':'Apple','TSLA':'Tesla','MSFT':'Microsoft',
+    'META':'Meta','AMZN':'Amazon','GOOGL':'Google','AMD':'AMD'
+  };
+  list.innerHTML=monitorStocks.map(s=>`
+    <div class="mitem" id="mitem-${s.id}" onclick="openStockModal('${s.id}','${s.market}')" style="cursor:pointer">
+      <span class="sig watch" id="msig-${s.id}"></span>
+      <div style="flex:1">
+        <div class="scode">${s.id.toUpperCase()}</div>
+        <div class="sname">${NAMES[s.id.toUpperCase()]||s.id} <span style="font-size:9px">${s.market==='us'?'🇺🇸':'🇹🇼'}</span></div>
+      </div>
+      <div>
+        <div class="sprice" id="mprice-${s.id}" style="color:var(--text3)">載入中…</div>
+        <div class="schange" id="mchg-${s.id}">—</div>
+      </div>
+      <span class="tag tb" id="mtag-${s.id}">—</span>
+      <button class="btn btnd btn-sm" style="padding:3px 7px;font-size:10px;flex-shrink:0" onclick="event.stopPropagation();removeFromMonitor('${s.id}')">✕</button>
+    </div>`).join('');
+
+  // 2. 非同步抓 API，回來後更新各欄位
   try{
-    const r=await fetch(`${API}/monitor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stocks:monitorStocks})});
+    const r=await fetch(`${API}/monitor`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({stocks:monitorStocks}),signal:AbortSignal.timeout(25000)});
     const data=await r.json();
     let buy=0,sell=0,hold=0;
-    $('monitorList').innerHTML=data.map(s=>{
+    data.forEach(s=>{
       const chg=s.change_pct||0;
       const sc=sigClass(s.quick_signal);
       if(sc==='buy') buy++; else if(sc==='sell') sell++; else hold++;
-      return `<div class="mitem" onclick="openStockModal('${s.id}','${(s.market||'TW').toLowerCase()}')" style="cursor:pointer">
-        <span class="sig ${sc}"></span>
-        <div style="flex:1"><div class="scode">${s.id}</div><div class="sname">${s.name||''} <span style="font-size:9px">${s.market==='US'?'🇺🇸':'🇹🇼'}</span></div></div>
-        <div>
-          <div class="sprice ${chgClass(chg)}">$${fmtN(s.price)}</div>
-          <div class="schange ${chgClass(chg)}">${chgStr(chg)}</div>
-        </div>
-        ${signal2tag(s.quick_signal)}
-        <button class="btn btnd btn-sm" style="padding:3px 7px;font-size:10px;flex-shrink:0" onclick="event.stopPropagation();removeFromMonitor('${s.id}')">✕</button>
-      </div>`;
-    }).join('');
+      const pEl=$('mprice-'+s.id), cEl=$('mchg-'+s.id),
+            tEl=$('mtag-'+s.id),  sEl=$('msig-'+s.id);
+      if(pEl){ pEl.className='sprice '+chgClass(chg); pEl.textContent='$'+fmtN(s.price); }
+      if(cEl){ cEl.className='schange '+chgClass(chg); cEl.textContent=chgStr(chg); }
+      if(tEl) tEl.outerHTML=signal2tag(s.quick_signal);
+      if(sEl) sEl.className='sig '+sc;
+      // 更新名稱（API 回的比靜態字典準）
+      const nEl=document.querySelector(`#mitem-${s.id} .sname`);
+      if(nEl&&s.name) nEl.innerHTML=`${s.name} <span style="font-size:9px">${s.market==='US'?'🇺🇸':'🇹🇼'}</span>`;
+    });
     $('ms-count').textContent=data.length+' 檔';
     $('ms-buy').textContent=buy+' 檔';
     $('ms-sell').textContent=sell+' 檔';
     $('ms-hold').textContent=hold+' 檔';
-  }catch(e){ $('monitorList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px">⚠ 無法連接伺服器</div>'; }
+  }catch(e){
+    // API 失敗時不清空列表，只在底部顯示提示
+    const warn=document.createElement('div');
+    warn.style.cssText='color:var(--yellow);font-size:10px;text-align:center;padding:8px';
+    warn.textContent='⚠ 即時報價載入失敗，顯示上次快取';
+    list.appendChild(warn);
+  }
 }
 
 function selectMonStock(id,name,price){
@@ -1540,8 +1572,8 @@ async function loadTechStock(){
     const data=await r.json();
     const ind=data.indicators||{};
     const hist=data.history||data.history;
-    // K line chart
-    if(hist&&hist.closes){ drawKlineChart('klineChart','klineLabels',hist); }
+    // K line chart（加 setTimeout 確保 canvas 已 paint）
+    if(hist&&hist.closes){ setTimeout(()=>drawKlineChart('klineChart','klineLabels',hist),80); }
     // Indicators
     const MA=ind.MA||{}; const BB=ind.Bollinger||{}; const KD=ind.KD||{}; const MACD=ind.MACD||{};
     const rsi=ind.RSI14; const atr=ind.ATR14;

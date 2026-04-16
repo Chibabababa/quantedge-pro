@@ -219,36 +219,53 @@ def get_headers():
 # 保留向後兼容的 HEADERS 變數
 HEADERS = get_headers()
 
+def _yf_history_price(ticker_symbol):
+    """
+    從 yfinance history() 安全取得最新收盤價與昨收。
+    比 fast_info 穩定 10 倍，適合雲端部署。
+    回傳 (price, prev_close) 或 (None, None)
+    """
+    try:
+        t = yf.Ticker(ticker_symbol)
+        df = t.history(period="5d", auto_adjust=True)
+        if df.empty:
+            return None, None
+        price = float(df["Close"].iloc[-1])
+        prev  = float(df["Close"].iloc[-2]) if len(df) >= 2 else price
+        if price <= 0:
+            return None, None
+        return round(price, 2), round(prev, 2)
+    except Exception as e:
+        print(f"yf history error {ticker_symbol}: {e}")
+        return None, None
+
+def _yf_get_name(ticker_symbol, fallback):
+    """安全取得股票名稱（可能很慢，加 timeout 保護）"""
+    try:
+        info = yf.Ticker(ticker_symbol).info
+        return info.get("shortName") or info.get("longName") or fallback
+    except Exception:
+        return fallback
+
 def fetch_tw_price_yfinance(stock_id):
-    """yfinance 備援抓台股價格（TWSE/TPEX 失敗時使用）"""
+    """yfinance 備援抓台股價格（TWSE/TPEX 失敗時使用）
+    使用 history() 取代 fast_info，對雲端部署友善
+    """
     with _yf_semaphore:
-        try:
-            for suffix in [".TW", ".TWO"]:
-                ticker = yf.Ticker(f"{stock_id}{suffix}")
-                info = ticker.fast_info
-                price = float(info.last_price or 0)
-                if price > 0:
-                    prev = float(info.previous_close or price)
-                    change = round(price - prev, 2)
-                    change_pct = round((change / prev) * 100, 2) if prev else 0
-                    name = TW_STOCKS_DB.get(stock_id, stock_id)
-                    try:
-                        full_name = ticker.info.get("shortName", name)
-                        if full_name:
-                            name = full_name
-                    except Exception:
-                        pass
-                    result = {
-                        "id": stock_id, "name": name,
-                        "price": price, "yesterday": prev,
-                        "change": change, "change_pct": change_pct,
-                        "volume": int(getattr(info, "three_month_average_volume", 0) or 0),
-                        "market": "TWSE"
-                    }
-                    cache_set(f"twse_{stock_id}", result, 60)
-                    return result
-        except Exception as e:
-            print(f"yfinance TW fallback error {stock_id}: {e}")
+        for suffix in [".TW", ".TWO"]:
+            price, prev = _yf_history_price(f"{stock_id}{suffix}")
+            if price:
+                change = round(price - prev, 2)
+                change_pct = round((change / prev) * 100, 2) if prev else 0
+                name = TW_STOCKS_DB.get(stock_id, stock_id)
+                result = {
+                    "id": stock_id, "name": name,
+                    "price": price, "yesterday": prev,
+                    "change": change, "change_pct": change_pct,
+                    "volume": 0, "market": "TWSE"
+                }
+                cache_set(f"twse_{stock_id}", result, 120)
+                return result
     return None
 
 def fetch_twse_price(stock_id):
@@ -365,57 +382,63 @@ def fetch_tw_history(stock_id, months=3):
         return None
 
 def fetch_us_stock(symbol):
-    """Yahoo Finance 抓美股即時 + 歷史"""
+    """Yahoo Finance 抓美股即時 + 歷史（全用 history，不用 fast_info）"""
     cached = cache_get(f"us_{symbol}")
     if cached:
         return cached
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.fast_info
-        hist = ticker.history(period="3mo")
-        price = round(float(info.last_price), 2)
-        prev = round(float(info.previous_close), 2)
-        change = round(price - prev, 2)
-        change_pct = round((change / prev) * 100, 2) if prev else 0
-        hist = hist.reset_index()
-        result = {
-            "id": symbol, "name": ticker.info.get("shortName", symbol),
-            "price": price, "yesterday": prev,
-            "change": change, "change_pct": change_pct,
-            "volume": int(info.three_month_average_volume or 0),
-            "market": "US",
-            "history": {
-                "dates": [str(d.date()) for d in hist["Date"]],
-                "opens": [round(float(v), 2) for v in hist["Open"]],
-                "highs": [round(float(v), 2) for v in hist["High"]],
-                "lows": [round(float(v), 2) for v in hist["Low"]],
-                "closes": [round(float(v), 2) for v in hist["Close"]],
-                "volumes": [int(v) for v in hist["Volume"]]
+    with _yf_semaphore:
+        try:
+            ticker = yf.Ticker(symbol)
+            # 用 3 個月歷史抓價格和指標
+            df = ticker.history(period="3mo", auto_adjust=True)
+            if df.empty:
+                return None
+            df = df.reset_index()
+            price = round(float(df["Close"].iloc[-1]), 2)
+            prev  = round(float(df["Close"].iloc[-2]), 2) if len(df) >= 2 else price
+            change = round(price - prev, 2)
+            change_pct = round((change / prev) * 100, 2) if prev else 0
+            # 股票名稱（快速取，失敗用 symbol）
+            name = symbol
+            try:
+                info_data = ticker.info
+                name = info_data.get("shortName") or info_data.get("longName") or symbol
+            except Exception:
+                pass
+            result = {
+                "id": symbol, "name": name,
+                "price": price, "yesterday": prev,
+                "change": change, "change_pct": change_pct,
+                "volume": int(df["Volume"].iloc[-1]) if "Volume" in df else 0,
+                "market": "US",
+                "history": {
+                    "dates":   [str(d.date()) if hasattr(d,"date") else str(d)[:10] for d in df["Date"]],
+                    "opens":   [round(float(v), 2) for v in df["Open"]],
+                    "highs":   [round(float(v), 2) for v in df["High"]],
+                    "lows":    [round(float(v), 2) for v in df["Low"]],
+                    "closes":  [round(float(v), 2) for v in df["Close"]],
+                    "volumes": [int(v) for v in df["Volume"]]
+                }
             }
-        }
-        cache_set(f"us_{symbol}", result, 60)
-        return result
-    except Exception as e:
-        print(f"US stock fetch error {symbol}: {e}")
-        return None
+            cache_set(f"us_{symbol}", result, 120)
+            return result
+        except Exception as e:
+            print(f"US stock fetch error {symbol}: {e}")
+            return None
 
 def fetch_tw_index():
-    """台灣大盤指數"""
+    """台灣加權指數（用 history，不用 fast_info）"""
     cached = cache_get("tw_index")
     if cached:
         return cached
-    try:
-        ticker = yf.Ticker("^TWII")
-        info = ticker.fast_info
-        price = round(float(info.last_price), 2)
-        prev = round(float(info.previous_close), 2)
+    price, prev = _yf_history_price("^TWII")
+    if price:
         change = round(price - prev, 2)
         change_pct = round((change / prev) * 100, 2) if prev else 0
         result = {"price": price, "change": change, "change_pct": change_pct}
-        cache_set("tw_index", result, 60)
+        cache_set("tw_index", result, 120)
         return result
-    except:
-        return {"price": 0, "change": 0, "change_pct": 0}
+    return {"price": 0, "change": 0, "change_pct": 0}
 
 def get_full_indicators(stock_id, is_tw=True):
     """取得完整技術指標"""
@@ -658,19 +681,21 @@ def health():
 
 @app.route("/api/index")
 def api_index():
-    """大盤指數（台灣加權 + 美股三大指數）"""
+    """大盤指數（台灣加權 + 美股三大指數）全用 history()"""
     tw = fetch_tw_index()
     us_indices = {}
     for sym, name in [("^GSPC", "S&P500"), ("^IXIC", "NASDAQ"), ("^DJI", "道瓊")]:
-        try:
-            t = yf.Ticker(sym).fast_info
-            p = round(float(t.last_price), 2)
-            prev = round(float(t.previous_close), 2)
+        cached = cache_get(f"idx_{sym}")
+        if cached:
+            us_indices[name] = cached
+            continue
+        p, prev = _yf_history_price(sym)
+        if p:
             chg = round(p - prev, 2)
             chg_pct = round(chg / prev * 100, 2) if prev else 0
-            us_indices[name] = {"price": p, "change": chg, "change_pct": chg_pct}
-        except:
-            pass
+            entry = {"price": p, "change": chg, "change_pct": chg_pct}
+            cache_set(f"idx_{sym}", entry, 120)
+            us_indices[name] = entry
     return jsonify({"tw_weighted": tw, "us": us_indices})
 
 @app.route("/api/stock/<stock_id>")
