@@ -114,6 +114,9 @@ select option{background:var(--bg2)}
 .btnp{background:linear-gradient(135deg,rgba(0,200,150,.25),rgba(0,200,150,.12));border-color:var(--accent);color:var(--accent2)}
 .btnd{background:rgba(255,77,109,.07);border-color:rgba(255,77,109,.3);color:var(--red)}
 .btn-sm{padding:5px 11px;font-size:11px}
+.btnrun{background:linear-gradient(135deg,#00c896,#00a876);border-color:#00c896;color:#000;font-weight:700;font-size:13px;padding:9px 20px;box-shadow:0 0 14px rgba(0,200,150,.35);letter-spacing:.5px}
+.btnrun:hover{background:linear-gradient(135deg,#00e0aa,#00c896);box-shadow:0 0 22px rgba(0,200,150,.55);transform:translateY(-1px)}
+.btnsave{font-size:13px;padding:9px 20px;border-color:var(--accent)}
 
 /* SIGNAL */
 .sig{width:7px;height:7px;border-radius:50%;flex-shrink:0}
@@ -309,8 +312,8 @@ select option{background:var(--bg2)}
   <div class="nav-inner">
     <button class="tab active" onclick="go('dashboard')" id="tab-dashboard">◈ 總覽</button>
     <button class="tab" onclick="go('strategy')" id="tab-strategy">⬡ 策略積木</button>
+    <button class="tab" onclick="go('screen')" id="tab-screen">🔍 篩選器</button>
     <button class="tab" onclick="go('monitor')" id="tab-monitor">◉ 監控</button>
-    <button class="tab" onclick="go('performance')" id="tab-performance">📊 績效↓</button>
     <button class="tab" onclick="go('recommend')" id="tab-recommend">★ 今日推薦</button>
     <button class="tab" onclick="go('technical')" id="tab-technical">⌘ 技術指標</button>
   </div>
@@ -358,36 +361,25 @@ select option{background:var(--bg2)}
 </div>
 
 <!-- ===== STRATEGY ===== -->
-<div class="page" id="page-strategy">
+<!-- ===== SCREEN ===== -->
+<div class="page" id="page-screen">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
     <div>
-      <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;letter-spacing:1px">⬡ 量化策略積木</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">組合技術指標，設計高勝率策略</div>
+      <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;letter-spacing:1px">🔍 量化條件篩選器</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">多條件組合選股 · 勾選條件 → 開始篩選 → 符合標的加入監控</div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-sm" onclick="runBacktest()">▶ 執行回測</button>
-      <button class="btn btnp btn-sm" onclick="saveStrat()">💾 儲存策略</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="screenMarket" style="width:90px;font-size:11px">
+        <option value="tw">台股</option>
+        <option value="us">美股</option>
+        <option value="all">全部</option>
+      </select>
+      <button class="btn btn-sm" onclick="clearScreen()" style="font-size:11px">✕ 清除</button>
+      <button class="btn btnp" onclick="runScreen()" id="screenBtn">🔍 開始篩選</button>
     </div>
   </div>
 
-  <!-- ══ 技術指標股票篩選器 ══════════════════════════════════ -->
   <div class="card mb16" style="border-color:rgba(0,200,150,.25);background:linear-gradient(135deg,rgba(0,200,150,.04),rgba(0,0,0,0))">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-      <div>
-        <div class="ctitle" style="color:var(--accent)">🔍 量化條件篩選器 <span class="badge">多條件組合選股</span></div>
-        <div style="font-size:10px;color:var(--text3);margin-top:3px">勾選條件 → 開始篩選 → 符合標的加入監控</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select id="screenMarket" style="width:90px;font-size:11px">
-          <option value="tw">台股</option>
-          <option value="us">美股</option>
-          <option value="all">全部</option>
-        </select>
-        <button class="btn btn-sm" onclick="clearScreen()" style="font-size:11px">✕ 清除</button>
-        <button class="btn btnp btn-sm" onclick="runScreen()" id="screenBtn">🔍 開始篩選</button>
-      </div>
-    </div>
-
     <!-- ── 技術面 ── -->
     <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📐 技術面指標</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
@@ -431,7 +423,7 @@ select option{background:var(--bg2)}
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-macd-weekly" onchange="toggleChip('macd-weekly')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:11px;font-weight:600" style="color:#c084fc">🟣 MACD 週線翻紅</div>
+            <div style="font-size:11px;font-weight:600;color:#c084fc">🟣 MACD 週線翻紅</div>
             <div style="font-size:9px;color:var(--text3);margin-top:3px">週K MACD柱狀翻正，中線動能強</div>
           </div>
         </div>
@@ -446,7 +438,7 @@ select option{background:var(--bg2)}
           </div>
         </div>
       </div>
-      <!-- 均線多頭排列 -->
+      <!-- 三線多頭排列 -->
       <div class="cond-chip" id="chip-bull-align">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-bull-align" onchange="toggleChip('bull-align')"><span class="chip-slider"></span></label>
@@ -461,7 +453,6 @@ select option{background:var(--bg2)}
     <!-- ── 量能面 ── -->
     <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📦 量能面</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
-      <!-- 量能 -->
       <div class="cond-chip" id="chip-vol">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-vol" onchange="toggleChip('vol')"><span class="chip-slider"></span></label>
@@ -480,8 +471,7 @@ select option{background:var(--bg2)}
 
     <!-- ── 基本面 ── -->
     <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📋 基本面（美股為主，台股參考）</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
-      <!-- 營收成長 -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:8px">
       <div class="cond-chip" id="chip-rev">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-rev" onchange="toggleChip('rev')"><span class="chip-slider"></span></label>
@@ -491,7 +481,6 @@ select option{background:var(--bg2)}
           </div>
         </div>
       </div>
-      <!-- EPS成長 -->
       <div class="cond-chip" id="chip-eps">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-eps" onchange="toggleChip('eps')"><span class="chip-slider"></span></label>
@@ -501,7 +490,6 @@ select option{background:var(--bg2)}
           </div>
         </div>
       </div>
-      <!-- 評分 -->
       <div class="cond-chip" id="chip-score">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-score" onchange="toggleChip('score')"><span class="chip-slider"></span></label>
@@ -515,23 +503,36 @@ select option{background:var(--bg2)}
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- 篩選結果 -->
-    <div id="screenResult" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:12px;font-weight:600;color:var(--accent)">篩選結果 <span id="screenCount" class="badge">0 檔</span></div>
-        <button class="btn btn-sm" onclick="addAllToMonitor()" style="font-size:11px">＋ 全部加入監控</button>
-      </div>
-      <div id="screenGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px"></div>
+  <!-- 篩選結果 -->
+  <div id="screenResult" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--accent)">篩選結果 <span id="screenCount" class="badge">0 檔</span></div>
+      <button class="btn btn-sm" onclick="addAllToMonitor()" style="font-size:11px">＋ 全部加入監控</button>
     </div>
-    <div id="screenLoading" style="display:none;text-align:center;padding:24px">
-      <div class="spinner" style="margin:0 auto 10px"></div>
-      <div style="font-size:12px;color:var(--text3)" id="screenLoadMsg">正在用技術指標掃描股票庫，約需 15–45 秒…</div>
+    <div id="screenGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px"></div>
+  </div>
+  <div id="screenLoading" style="display:none;text-align:center;padding:24px">
+    <div class="spinner" style="margin:0 auto 10px"></div>
+    <div style="font-size:12px;color:var(--text3)" id="screenLoadMsg">正在用技術指標掃描股票庫，約需 15–45 秒…</div>
+  </div>
+  <div id="screenError" style="display:none;padding:12px;background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.2);border-radius:8px;margin-top:8px">
+    <div style="font-size:12px;color:var(--red);font-weight:600">⚠ 篩選失敗</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:4px" id="screenErrMsg">—</div>
+    <button class="btn btn-sm" style="margin-top:8px;font-size:11px" onclick="wakeAndScreen()">🔄 重試（預熱伺服器）</button>
+  </div>
+</div>
+
+<div class="page" id="page-strategy">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;letter-spacing:1px">⬡ 量化策略積木</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">組合技術指標，設計高勝率策略</div>
     </div>
-    <div id="screenError" style="display:none;padding:12px;background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.2);border-radius:8px;margin-top:8px">
-      <div style="font-size:12px;color:var(--red);font-weight:600">⚠ 篩選失敗</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px" id="screenErrMsg">—</div>
-      <button class="btn btn-sm" style="margin-top:8px;font-size:11px" onclick="wakeAndScreen()">🔄 重試（預熱伺服器）</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btnrun" onclick="runBacktest()">▶ 執行回測</button>
+      <button class="btn btnp btnsave" onclick="saveStrat()">💾 儲存策略</button>
     </div>
   </div>
 
@@ -855,8 +856,8 @@ select option{background:var(--bg2)}
 <nav class="mobile-nav">
   <button class="mtab active" onclick="go('dashboard');mact(this)"><span class="mtab-i">◈</span>總覽</button>
   <button class="mtab" onclick="go('strategy');mact(this)"><span class="mtab-i">⬡</span>策略</button>
+  <button class="mtab" onclick="go('screen');mact(this)"><span class="mtab-i">🔍</span>篩選</button>
   <button class="mtab" onclick="go('monitor');mact(this)"><span class="mtab-i">◉</span>監控</button>
-  <button class="mtab" onclick="go('performance');mact(this)"><span class="mtab-i">📊</span>績效↓</button>
   <button class="mtab" onclick="go('recommend');mact(this)"><span class="mtab-i">★</span>推薦</button>
   <button class="mtab" onclick="go('technical');mact(this)"><span class="mtab-i">⌘</span>技術</button>
 </nav>
@@ -1359,7 +1360,9 @@ function go(id){
   }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
-  $('page-'+id).classList.add('active');
+  const pg=$('page-'+id);
+  if(!pg) return;
+  pg.classList.add('active');
   const t=$('tab-'+id); if(t) t.classList.add('active');
   if(id==='dashboard') loadDashboard();
   if(id==='monitor') loadMonitor();
