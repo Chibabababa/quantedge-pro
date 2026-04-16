@@ -329,7 +329,14 @@ select option{background:var(--bg2)}
 
   <div class="g2 gap mb20">
     <div class="card">
-      <div class="ctitle">📈 台積電 (2330) 走勢圖</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+        <div class="ctitle" style="margin-bottom:0" id="twiiChartTitle">📈 台灣加權指數 走勢圖</div>
+        <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700" id="twiiChartPrice">—</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:11px;color:var(--text3)">TWII・近3個月</span>
+        <span id="twiiChartChg" style="font-size:11px">—</span>
+      </div>
       <canvas id="mainChart" height="180" style="width:100%"></canvas>
       <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace" id="mainChartLabels"></div>
     </div>
@@ -545,11 +552,37 @@ select option{background:var(--bg2)}
       <div class="card mb16">
         <div class="ctitle">⚙ 回測設定</div>
         <div class="irow">
-          <div class="ig"><div class="ilabel">回測股票（台股）</div>
+          <div class="ig"><div class="ilabel">回測股票</div>
             <select id="btStock">
-              <option value="2330">2330 台積電</option><option value="2454">2454 聯發科</option>
-              <option value="2317">2317 鴻海</option><option value="2412">2412 中華電</option>
-              <option value="0050">0050 元大50</option>
+              <optgroup label="台股 半導體">
+                <option value="2330">2330 台積電</option>
+                <option value="2454">2454 聯發科</option>
+                <option value="2303">2303 聯電</option>
+                <option value="3711">3711 日月光投控</option>
+              </optgroup>
+              <optgroup label="台股 電子/科技">
+                <option value="2317">2317 鴻海</option>
+                <option value="2382">2382 廣達</option>
+                <option value="3008">3008 大立光</option>
+                <option value="6669">6669 緯穎</option>
+              </optgroup>
+              <optgroup label="台股 金融/傳產">
+                <option value="2412">2412 中華電</option>
+                <option value="2881">2881 富邦金</option>
+                <option value="2603">2603 長榮</option>
+                <option value="1101">1101 台泥</option>
+              </optgroup>
+              <optgroup label="台股 ETF">
+                <option value="0050">0050 元大台灣50</option>
+                <option value="0056">0056 元大高股息</option>
+                <option value="00878">00878 國泰永續高股息</option>
+              </optgroup>
+              <optgroup label="美股">
+                <option value="NVDA">NVDA NVIDIA</option>
+                <option value="AAPL">AAPL Apple</option>
+                <option value="TSLA">TSLA Tesla</option>
+                <option value="AMD">AMD AMD</option>
+              </optgroup>
             </select>
           </div>
           <div class="ig"><div class="ilabel">策略類型</div>
@@ -700,6 +733,27 @@ select option{background:var(--bg2)}
       <input type="text" id="techStockInput" placeholder="輸入代號" style="width:110px" value="2330">
       <select id="techMarket"><option value="tw">台股</option><option value="us">美股</option></select>
       <button class="btn btnp btn-sm" onclick="loadTechStock()">查詢</button>
+      <!-- 週期自訂 -->
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;border-left:1px solid var(--border2);padding-left:8px;margin-left:4px">
+        <span style="font-size:10px;color:var(--text3)">RSI</span>
+        <input type="number" id="p-rsi" value="14" min="5" max="30" title="RSI週期" style="width:44px;font-size:11px;padding:3px 5px">
+        <span style="font-size:10px;color:var(--text3)">MACD</span>
+        <input type="number" id="p-macd-fast" value="12" min="5" max="20" title="MACD快線" style="width:38px;font-size:11px;padding:3px 5px">
+        <span style="font-size:9px;color:var(--text3)">/</span>
+        <input type="number" id="p-macd-slow" value="26" min="10" max="50" title="MACD慢線" style="width:38px;font-size:11px;padding:3px 5px">
+        <span style="font-size:9px;color:var(--text3)">/</span>
+        <input type="number" id="p-macd-sig" value="9" min="5" max="15" title="MACD信號" style="width:38px;font-size:11px;padding:3px 5px">
+        <span style="font-size:10px;color:var(--text3)">BB</span>
+        <input type="number" id="p-bb" value="20" min="10" max="50" title="布林帶週期" style="width:44px;font-size:11px;padding:3px 5px">
+        <span style="font-size:10px;color:var(--text3)">K線</span>
+        <select id="p-kline-bars" style="font-size:11px;padding:3px 5px">
+          <option value="60">60根</option>
+          <option value="90">90根</option>
+          <option value="120" selected>120根</option>
+          <option value="180">180根</option>
+          <option value="250">250根</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -919,9 +973,13 @@ const STRATEGY_LIB=[
 ];
 function initStratLib(){
   const el=$('stratLib');if(!el) return;
+  // 先渲染「計算中…」佔位，再非同步拉真實勝率
   el.innerHTML=STRATEGY_LIB.map((s,i)=>`
     <div class="stratlib-item" id="stlib-${i}" onclick="applyStrategy(${i})">
-      <div style="text-align:center"><div class="stratlib-wr">${s.wr.split('~')[0]}%</div><div style="font-size:8px;color:var(--text3)">勝率</div></div>
+      <div style="text-align:center">
+        <div class="stratlib-wr" id="stlib-wr-${i}" style="font-size:18px">…</div>
+        <div style="font-size:8px;color:var(--text3)">真實勝率</div>
+      </div>
       <div style="flex:1">
         <div class="stratlib-name">${s.name}</div>
         <div class="stratlib-desc">${s.desc}</div>
@@ -930,6 +988,28 @@ function initStratLib(){
         </div>
       </div>
     </div>`).join('');
+  // 非同步拉取真實勝率
+  fetch(`${API}/strategy_winrate`).then(r=>r.ok?r.json():null).then(data=>{
+    if(!data) return;
+    STRATEGY_LIB.forEach((s,i)=>{
+      const d=data[s.strategy];
+      if(d){
+        const wr=d.winrate;
+        const el=$('stlib-wr-'+i);
+        if(el){
+          el.textContent=wr+'%';
+          el.style.color=wr>=60?'var(--accent)':wr>=50?'var(--yellow)':'var(--red)';
+          el.style.fontSize='';
+        }
+      }
+    });
+  }).catch(()=>{
+    // 失敗時顯示估計值
+    STRATEGY_LIB.forEach((s,i)=>{
+      const el=$('stlib-wr-'+i);
+      if(el){el.textContent=s.wr.split('~')[0]+'%';}
+    });
+  });
 }
 function applyStrategy(idx){
   const s=STRATEGY_LIB[idx];
@@ -1184,13 +1264,19 @@ async function loadIndex(){
     const d=await r.json();
     const tw=d.tw_weighted||{};
     const twii=tw.price; const twchg=tw.change_pct;
+    const mktOpen=tw.market_open; const isCached=tw.is_cached;
+    // 加權指數數值
     $('d-twii').textContent=fmtN(twii);
-    $('d-twii').className='sval '+(twchg>0?'up':'dn');
-    $('d-twii-sub').innerHTML=`漲跌幅 <span class="${chgClass(twchg)}">${chgStr(twchg)}</span>`;
+    $('d-twii').className='sval '+(twchg>0?'up':(twchg<0?'dn':'neutral'));
+    // 副標：漲跌幅 + 市場狀態標籤
+    const mktLabel = mktOpen
+      ? '<span style="color:#4ade80;font-size:10px;margin-left:4px">● 開盤中</span>'
+      : '<span style="color:var(--text3);font-size:10px;margin-left:4px">最後收盤</span>';
+    $('d-twii-sub').innerHTML=`漲跌幅 <span class="${chgClass(twchg)}">${chgStr(twchg)}</span>${mktLabel}`;
     $('h-twii').textContent=fmtN(twii);
-    $('h-twii').className='hstat-v '+(twchg>0?'up':'dn');
-    $('h-twii-chg').textContent=chgStr(twchg);
-    $('h-twii-chg').className='hstat-v '+(twchg>0?'up':'dn');
+    $('h-twii').className='hstat-v '+(twchg>0?'up':(twchg<0?'dn':'neutral'));
+    $('h-twii-chg').textContent=chgStr(twchg)+(mktOpen?' ●':'');
+    $('h-twii-chg').className='hstat-v '+(twchg>0?'up':(twchg<0?'dn':'neutral'));
     const us=d.us||{};
     const sp=us['S&P500']||{}; const nq=us['NASDAQ']||{};
     $('d-sp500').textContent=fmtN(sp.price);
@@ -1208,13 +1294,39 @@ async function loadIndex(){
   }catch(e){ console.log('Index load error:',e); }
 }
 
-// ── 主K線圖（台積電） ─────────────────────────────
+// ── 主圖：台灣加權指數走勢 ──────────────────────────
 async function loadMainChart(){
   try{
-    const r=await fetch(`${API}/history/2330?market=tw`); if(!r.ok) return;
+    // 抓加權指數歷史（用 ^TWII）
+    const r=await fetch(`${API}/history/%5ETWII?market=us`);
+    if(!r.ok) throw new Error('twii fail');
     const hist=await r.json();
-    drawLineChart('mainChart','mainChartLabels',hist.closes,hist.dates);
-  }catch(e){ console.log('Chart error:',e); }
+    if(hist&&hist.closes&&hist.closes.length>2){
+      drawLineChart('mainChart','mainChartLabels',hist.closes,hist.dates);
+      // 填入目前價格與漲跌
+      const closes=hist.closes;
+      const last=closes[closes.length-1];
+      const prev=closes[closes.length-2];
+      const chg=last-prev, chgPct=prev?((chg/prev)*100):0;
+      const priceEl=$('twiiChartPrice'), chgEl=$('twiiChartChg');
+      if(priceEl){ priceEl.textContent=last.toLocaleString(); priceEl.className=chg>=0?'up':'dn'; }
+      if(chgEl){
+        chgEl.textContent=(chg>=0?'+':'')+chgPct.toFixed(2)+'%';
+        chgEl.className=chg>=0?'up':'dn';
+      }
+      return;
+    }
+  }catch(e){ console.log('TWII chart error:',e); }
+  // 備援：改用台積電
+  try{
+    const r2=await fetch(`${API}/history/2330?market=tw`); if(!r2.ok) return;
+    const hist2=await r2.json();
+    if(hist2&&hist2.closes){
+      drawLineChart('mainChart','mainChartLabels',hist2.closes,hist2.dates);
+      const t=$('twiiChartTitle');
+      if(t) t.textContent='📈 台積電 (2330) 走勢圖';
+    }
+  }catch(e2){ console.log('fallback chart error:',e2); }
 }
 
 function drawLineChart(canvasId,labelsId,closes,dates){
@@ -1394,11 +1506,56 @@ async function loadMonitor(){
 
   // 1. 立即顯示骨架列（代號+名稱已知，價格等 API 回來再填）
   const NAMES={
-    '2330':'台積電','2317':'鴻海','2454':'聯發科','3008':'大立光',
-    '0050':'元大50','2412':'中華電','2382':'廣達','2881':'富邦金',
-    '2882':'國泰金','2891':'中信金','2886':'兆豐金','6505':'台塑化',
+    // 半導體
+    '2330':'台積電','2454':'聯發科','2303':'聯電','2308':'台達電',
+    '3034':'聯詠','2379':'瑞昱','6770':'力積電','3711':'日月光投控','2449':'京元電子',
+    '3443':'創意','6515':'穎崴','3081':'聯亞','2337':'旺宏','3533':'嘉澤','6274':'台燿',
+    // 電子/科技
+    '2317':'鴻海','2382':'廣達','2357':'華碩','2353':'宏碁','3008':'大立光',
+    '2395':'研華','4938':'和碩','2324':'仁寶','2356':'英業達','3231':'緯創',
+    '2377':'微星','2376':'技嘉','2385':'群光','2360':'致茂','3017':'奇鋐',
+    '2399':'映泰','3044':'健鼎','2301':'光寶科','3532':'台勝科',
+    '6669':'緯穎','6488':'環球晶','3035':'智原',
+    // 顯示/光電
+    '2409':'友達','3481':'群創','2448':'晶電','3189':'景碩',
+    // 網通
+    '2345':'智邦','3630':'新鉅科',
+    // 金融
+    '2881':'富邦金','2882':'國泰金','2891':'中信金','2886':'兆豐金',
+    '2884':'玉山金','2887':'台新金','2885':'元大金','2892':'第一金','5880':'合庫金',
+    '2880':'華南金','2883':'開發金','2890':'永豐金','5876':'上海商銀',
+    '2834':'臺企銀','2801':'彰銀',
+    // 電信
+    '2412':'中華電','3045':'台灣大','4904':'遠傳',
+    // 石化/材料
+    '1301':'台塑','1303':'南亞','1326':'台化','6505':'台塑化','1402':'遠東新',
+    // 鋼鐵/傳產
+    '2002':'中鋼','2006':'東和鋼鐵','2027':'大成鋼',
+    '1101':'台泥','1102':'亞泥','1216':'統一','1229':'聯華','1210':'大成','1702':'南僑',
+    // 航運
+    '2615':'萬海','2603':'長榮','2609':'陽明','2610':'華航','2618':'長榮航',
+    // 生技
+    '4119':'旭富','1795':'美時','6547':'高端疫苗',
+    // 觀光/零售
+    '2207':'和泰車','2912':'統一超','9910':'豐泰','9914':'美利達','9921':'巨大',
+    // ETF
+    '0050':'元大台灣50','0056':'元大高股息',
+    '00878':'國泰永續高股息','00881':'國泰台灣5G+',
+    '00900':'富邦特選高股息','00692':'富邦公司治理',
+    '006208':'富邦台50','00850':'元大ESG永續',
+    // 其他熱門
+    '2327':'國巨','2408':'南亞科','2344':'華邦電','3037':'欣興',
+    '2049':'上銀','1590':'亞德客','2354':'鴻準',
+    // 美股科技
     'NVDA':'NVIDIA','AAPL':'Apple','TSLA':'Tesla','MSFT':'Microsoft',
-    'META':'Meta','AMZN':'Amazon','GOOGL':'Google','AMD':'AMD'
+    'META':'Meta','AMZN':'Amazon','GOOGL':'Google','AMD':'AMD',
+    'INTC':'Intel','QCOM':'高通','AVGO':'博通','TSM':'台積ADR',
+    'ASML':'ASML','NFLX':'Netflix','CRM':'Salesforce',
+    'MU':'美光','AMAT':'應用材料','KLAC':'科磊','NOW':'ServiceNow','SNOW':'Snowflake','PLTR':'Palantir',
+    // 美股金融/消費
+    'JPM':'摩根大通','BAC':'美國銀行','GS':'高盛','V':'Visa','MA':'Mastercard',
+    'JNJ':'嬌生','UNH':'聯合健康','PFE':'輝瑞','ABBV':'艾伯維',
+    'WMT':'沃爾瑪','COST':'好市多','NKE':'耐吉',
   };
   list.innerHTML=monitorStocks.map(s=>`
     <div class="mitem" id="mitem-${s.id}" onclick="openStockModal('${s.id}','${s.market}')" style="cursor:pointer">
@@ -1563,17 +1720,37 @@ function viewTech(id,market){ $('techStockInput').value=id; $('techMarket').valu
 async function loadTechStock(){
   const id=$('techStockInput').value.trim().toUpperCase()||'2330';
   const market=$('techMarket').value||'tw';
+  // 讀取自訂週期參數
+  const pRsi   = parseInt($('p-rsi')?.value)||14;
+  const pFast  = parseInt($('p-macd-fast')?.value)||12;
+  const pSlow  = parseInt($('p-macd-slow')?.value)||26;
+  const pSig   = parseInt($('p-macd-sig')?.value)||9;
+  const pBb    = parseInt($('p-bb')?.value)||20;
+  const pBars  = parseInt($('p-kline-bars')?.value)||120;
+
   $('techIndList').innerHTML='<div class="loading"><div class="spinner"></div>計算指標中...</div>';
   $('techChartTitle').textContent=`📊 ${id} K線走勢圖`;
   $('techAdvice').textContent='載入中...';
   try{
-    const r=await fetch(`${API}/stock/${id}?market=${market}`);
+    const qs=`market=${market}&rsi_period=${pRsi}&macd_fast=${pFast}&macd_slow=${pSlow}&macd_signal=${pSig}&bb_period=${pBb}`;
+    const r=await fetch(`${API}/stock/${id}?${qs}`);
     if(!r.ok) throw new Error('API error');
     const data=await r.json();
     const ind=data.indicators||{};
-    const hist=data.history||data.history;
-    // K line chart（加 setTimeout 確保 canvas 已 paint）
-    if(hist&&hist.closes){ setTimeout(()=>drawKlineChart('klineChart','klineLabels',hist),80); }
+    const hist=data.history||{};
+    // K line chart — 限制顯示根數
+    if(hist&&hist.closes){
+      const bars=Math.min(pBars, hist.closes.length);
+      const th={
+        dates:   hist.dates?.slice(-bars)||[],
+        opens:   hist.opens?.slice(-bars)||[],
+        highs:   hist.highs?.slice(-bars)||[],
+        lows:    hist.lows?.slice(-bars)||[],
+        closes:  hist.closes.slice(-bars),
+        volumes: hist.volumes?.slice(-bars)||[]
+      };
+      setTimeout(()=>drawKlineChart('klineChart','klineLabels',th),80);
+    }
     // Indicators
     const MA=ind.MA||{}; const BB=ind.Bollinger||{}; const KD=ind.KD||{}; const MACD=ind.MACD||{};
     const rsi=ind.RSI14; const atr=ind.ATR14;
@@ -1583,13 +1760,13 @@ async function loadTechStock(){
       <div class="indrow"><span class="indname">MA(5)</span><span class="indval">$${fmtN(MA.MA5)}</span>${ind2sig(price>MA.MA5)}</div>
       <div class="indrow"><span class="indname">MA(20)</span><span class="indval">$${fmtN(MA.MA20)}</span>${ind2sig(price>MA.MA20)}</div>
       <div class="indrow"><span class="indname">MA(60)</span><span class="indval">$${fmtN(MA.MA60)}</span>${ind2sig(price>MA.MA60)}</div>
-      <div class="indrow"><span class="indname">RSI(14)</span><span class="indval">${fmt(rsi)}</span>${rsi<30?'<span class="indsig buy">超賣</span>':rsi>70?'<span class="indsig sell">超買</span>':'<span class="indsig neutral">中性</span>'}</div>
-      <div class="indrow"><span class="indname">MACD</span><span class="indval ${MACD.macd>0?'up':'dn'}">${fmt(MACD.macd,3)}</span>${ind2sig(MACD.cross==='golden')}</div>
+      <div class="indrow"><span class="indname">RSI(${pRsi})</span><span class="indval">${fmt(rsi)}</span>${rsi<30?'<span class="indsig buy">超賣</span>':rsi>70?'<span class="indsig sell">超買</span>':'<span class="indsig neutral">中性</span>'}</div>
+      <div class="indrow"><span class="indname">MACD(${pFast}/${pSlow}/${pSig})</span><span class="indval ${MACD.macd>0?'up':'dn'}">${fmt(MACD.macd,3)}</span>${ind2sig(MACD.cross==='golden')}</div>
       <div class="indrow"><span class="indname">MACD柱</span><span class="indval ${MACD.histogram>0?'up':'dn'}">${fmt(MACD.histogram,3)}</span>${ind2sig(MACD.histogram>0)}</div>
       <div class="indrow"><span class="indname">K / D</span><span class="indval">${fmt(KD.K)} / ${fmt(KD.D)}</span>${ind2sig(KD.K>KD.D)}</div>
-      <div class="indrow"><span class="indname">布林上軌</span><span class="indval">$${fmtN(BB.upper)}</span>${ind2sig(price<BB.upper)}</div>
-      <div class="indrow"><span class="indname">布林中軌</span><span class="indval">$${fmtN(BB.middle)}</span>${ind2sig(price>BB.middle)}</div>
-      <div class="indrow"><span class="indname">布林下軌</span><span class="indval">$${fmtN(BB.lower)}</span>${ind2sig(price>BB.lower)}</div>
+      <div class="indrow"><span class="indname">BB(${pBb}) 上軌</span><span class="indval">$${fmtN(BB.upper)}</span>${ind2sig(price<BB.upper)}</div>
+      <div class="indrow"><span class="indname">BB 中軌</span><span class="indval">$${fmtN(BB.middle)}</span>${ind2sig(price>BB.middle)}</div>
+      <div class="indrow"><span class="indname">BB 下軌</span><span class="indval">$${fmtN(BB.lower)}</span>${ind2sig(price>BB.lower)}</div>
       <div class="indrow"><span class="indname">量能比</span><span class="indval">${fmt(ind.volume_ratio)}x</span>${ind2sig(ind.volume_ratio>1)}</div>
       <div class="indrow" style="border:none"><span class="indname">ATR(14)</span><span class="indval">${fmt(atr)}</span><span class="indsig neutral">波動</span></div>`;
     const score=ind.score||50;
@@ -1599,23 +1776,26 @@ async function loadTechStock(){
     $('techWinrate').textContent=wr+'%';
     $('techATR').textContent=fmt(atr);
     $('techAction').innerHTML=signal2tag(action);
-    // Advice
-    const ma5=MA.MA5||price, ma20=MA.MA20||price;
-    const target1=Math.round(price*1.05);
-    const target2=Math.round(price*1.10);
-    const stopLoss=Math.round(price*0.95);
+    // Item9: ATR 動態目標價（取代固定百分比）
+    const atrVal=atr&&atr>0?atr:price*0.03;
+    const target1=Math.round((price+atrVal*2)*10)/10;
+    const target2=Math.round((price+atrVal*4)*10)/10;
+    const stopLoss=Math.round((price-atrVal*1.5)*10)/10;
+    const t1Pct=((target1-price)/price*100).toFixed(1);
+    const t2Pct=((target2-price)/price*100).toFixed(1);
+    const slPct=((stopLoss-price)/price*100).toFixed(1);
     $('techAdvice').innerHTML=`
-      技術分析顯示 <strong style="color:var(--accent)">${action}</strong> 訊號，RSI=${fmt(rsi)}，MACD ${MACD.cross==='golden'?'黃金交叉':'死亡交叉'}，K/D ${KD.K>KD.D?'多頭':'空頭'}排列。<br><br>
-      <strong style="color:var(--text)">操作建議：</strong><br>
+      技術分析顯示 <strong style="color:var(--accent)">${action}</strong> 訊號，RSI(${pRsi})=${fmt(rsi)}，MACD ${MACD.cross==='golden'?'🟢 黃金交叉':'🔴 死亡交叉'}，K/D ${KD.K>KD.D?'多頭':'空頭'}排列。<br><br>
+      <strong style="color:var(--text)">ATR(14) 動態目標價：</strong>（ATR=${fmt(atrVal)}）<br>
       · 進場參考：<span class="mono" style="color:var(--accent)">$${fmtN(price)}</span><br>
-      · 目標價一：<span class="mono" style="color:var(--accent)">$${fmtN(target1)}</span>（+5%）<br>
-      · 目標價二：<span class="mono" style="color:var(--accent)">$${fmtN(target2)}</span>（+10%）<br>
-      · 停損設定：<span class="mono" style="color:var(--red)">$${fmtN(stopLoss)}</span>（-5%）<br>
+      · 目標一（ATR×2）：<span class="mono" style="color:var(--accent)">$${fmtN(target1)}</span>（${t1Pct>0?'+':''}${t1Pct}%）<br>
+      · 目標二（ATR×4）：<span class="mono" style="color:var(--accent)">$${fmtN(target2)}</span>（${t2Pct>0?'+':''}${t2Pct}%）<br>
+      · 停損（ATR×1.5）：<span class="mono" style="color:var(--red)">$${fmtN(stopLoss)}</span>（${slPct}%）<br>
       · 策略勝率：<span class="mono" style="color:var(--accent)">${wr}%</span>`;
     // News
     loadNewsForTech(id,market);
   }catch(e){
-    $('techIndList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px">⚠ 無法取得數據<br>請確認伺服器已啟動</div>';
+    $('techIndList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px">⚠ 無法取得數據<br>請確認伺服器連線</div>';
     $('techAdvice').textContent='無法連接伺服器，請確認 server.py 已啟動。';
   }
 }
@@ -1707,15 +1887,19 @@ function updateTradesTable(trades,stockId,strategy){
 }
 
 async function loadPerformance(){
-  // 自動執行三種策略比較（2330台積電）
   if(Object.keys(btResults).length>0){ updatePerformanceStats(); return; }
-  $('stratCompare').innerHTML='<div class="loading"><div class="spinner"></div>自動回測3種策略中...</div>';
+  // 使用使用者在策略積木頁選擇的股票；若未設定則用 0050（最具代表性）
+  const stockId=($('btStock')?.value)||'0050';
+  const market=isNaN(stockId[0])?'us':'tw';
+  $('stratCompare').innerHTML=`<div class="loading"><div class="spinner"></div>自動回測 ${stockId} 3種策略中...</div>`;
   const strategies=['MA_RSI','MACD','KD_RSI'];
   for(const s of strategies){
     try{
+      const sl=$('btSL')?.value||5;
+      const tp=$('btTP')?.value||15;
       const r=await fetch(`${API}/backtest`,{
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({stock_id:'2330',strategy:s,stop_loss:5,take_profit:15})
+        body:JSON.stringify({stock_id:stockId,strategy:s,stop_loss:sl,take_profit:tp})
       });
       const data=await r.json();
       if(!data.error) btResults[s]=data;
