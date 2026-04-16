@@ -310,7 +310,7 @@ select option{background:var(--bg2)}
     <button class="tab active" onclick="go('dashboard')" id="tab-dashboard">◈ 總覽</button>
     <button class="tab" onclick="go('strategy')" id="tab-strategy">⬡ 策略積木</button>
     <button class="tab" onclick="go('monitor')" id="tab-monitor">◉ 監控</button>
-    <button class="tab" onclick="go('performance')" id="tab-performance">📊 績效</button>
+    <button class="tab" onclick="go('performance')" id="tab-performance">📊 績效↓</button>
     <button class="tab" onclick="go('recommend')" id="tab-recommend">★ 今日推薦</button>
     <button class="tab" onclick="go('technical')" id="tab-technical">⌘ 技術指標</button>
   </div>
@@ -374,7 +374,7 @@ select option{background:var(--bg2)}
   <div class="card mb16" style="border-color:rgba(0,200,150,.25);background:linear-gradient(135deg,rgba(0,200,150,.04),rgba(0,0,0,0))">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
       <div>
-        <div class="ctitle" style="color:var(--accent)">🔍 技術指標篩選器 <span class="badge">選出符合條件的股票</span></div>
+        <div class="ctitle" style="color:var(--accent)">🔍 量化條件篩選器 <span class="badge">多條件組合選股</span></div>
         <div style="font-size:10px;color:var(--text3);margin-top:3px">勾選條件 → 開始篩選 → 符合標的加入監控</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -383,91 +383,139 @@ select option{background:var(--bg2)}
           <option value="us">美股</option>
           <option value="all">全部</option>
         </select>
+        <button class="btn btn-sm" onclick="clearScreen()" style="font-size:11px">✕ 清除</button>
         <button class="btn btnp btn-sm" onclick="runScreen()" id="screenBtn">🔍 開始篩選</button>
       </div>
     </div>
-    <!-- 篩選條件列 -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:14px">
+
+    <!-- ── 技術面 ── -->
+    <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📐 技術面指標</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
       <!-- RSI -->
       <div class="cond-chip" id="chip-rsi">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-rsi" checked onchange="toggleChip('rsi')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--blue)">⚡ RSI 區間</div>
-            <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
-              <span style="font-size:10px;color:var(--text3)">最小</span>
-              <input type="number" id="rsi-min" value="20" min="0" max="100" style="width:52px;font-size:12px">
-              <span style="font-size:10px;color:var(--text3)">— 最大</span>
-              <input type="number" id="rsi-max" value="40" min="0" max="100" style="width:52px;font-size:12px">
+            <div style="font-size:11px;font-weight:600;color:var(--blue)">⚡ RSI 超賣區間</div>
+            <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+              <input type="number" id="rsi-min" value="20" min="0" max="100" style="width:46px;font-size:11px" title="最小值">
+              <span style="font-size:9px;color:var(--text3)">~</span>
+              <input type="number" id="rsi-max" value="45" min="0" max="100" style="width:46px;font-size:11px" title="最大值">
             </div>
           </div>
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:5px">20–40 = 超賣區，適合尋底反彈</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:4px">建議 20–45 尋底反彈</div>
       </div>
-      <!-- MA 黃金交叉 -->
+      <!-- MA -->
       <div class="cond-chip" id="chip-ma">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-ma" onchange="toggleChip('ma')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--accent)">📊 MA 黃金交叉</div>
-            <div style="font-size:10px;color:var(--text3);margin-top:3px">MA5 &gt; MA20（短線多頭）</div>
+            <div style="font-size:11px;font-weight:600;color:var(--accent)">📊 MA 黃金交叉</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">MA5 &gt; MA20（短線多頭排列）</div>
           </div>
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:5px">短期均線高於中期均線</div>
       </div>
-      <!-- MACD -->
+      <!-- MACD 日線 -->
       <div class="cond-chip" id="chip-macd">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-macd" onchange="toggleChip('macd')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--purple)">📈 MACD 黃金交叉</div>
-            <div style="font-size:10px;color:var(--text3);margin-top:3px">DIF &gt; DEA（動能翻多）</div>
+            <div style="font-size:11px;font-weight:600;color:var(--purple)">📈 MACD 日線金叉</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">DIF 上穿 DEA，動能翻多</div>
           </div>
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:5px">動能指標轉強訊號</div>
+      </div>
+      <!-- MACD 週線翻紅 -->
+      <div class="cond-chip" id="chip-macd-weekly">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-macd-weekly" onchange="toggleChip('macd-weekly')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600" style="color:#c084fc">🟣 MACD 週線翻紅</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">週K MACD柱狀翻正，中線動能強</div>
+          </div>
+        </div>
       </div>
       <!-- KD -->
       <div class="cond-chip" id="chip-kd">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-kd" onchange="toggleChip('kd')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--yellow)">🔗 KD 黃金交叉</div>
-            <div style="font-size:10px;color:var(--text3);margin-top:3px">K 值 &gt; D 值（隨機多頭）</div>
+            <div style="font-size:11px;font-weight:600;color:var(--yellow)">🔗 KD 黃金交叉</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">K &gt; D，短線隨機指標翻多</div>
           </div>
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:5px">KD 轉強，短線反彈機率高</div>
       </div>
+      <!-- 均線多頭排列 -->
+      <div class="cond-chip" id="chip-bull-align">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-bull-align" onchange="toggleChip('bull-align')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--accent)">🚀 三線多頭排列</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">MA5 &gt; MA20 &gt; MA60 強趨勢</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 量能面 ── -->
+    <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📦 量能面</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
       <!-- 量能 -->
       <div class="cond-chip" id="chip-vol">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-vol" onchange="toggleChip('vol')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--red)">📦 量能放大</div>
-            <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
-              <span style="font-size:10px;color:var(--text3)">均量倍數 &gt;</span>
-              <input type="number" id="vol-ratio" value="1.2" min="0.5" max="5" step="0.1" style="width:50px;font-size:11px">
-              <span style="font-size:10px;color:var(--text3)">倍</span>
+            <div style="font-size:11px;font-weight:600;color:var(--red)">📦 量能放大</div>
+            <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+              <span style="font-size:9px;color:var(--text3)">均量 &gt;</span>
+              <input type="number" id="vol-ratio" value="1.2" min="0.5" max="5" step="0.1" style="width:46px;font-size:11px">
+              <span style="font-size:9px;color:var(--text3)">倍</span>
             </div>
           </div>
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:5px">成交量突破均量，買盤積極</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:4px">成交量突破20日均量</div>
+      </div>
+    </div>
+
+    <!-- ── 基本面 ── -->
+    <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📋 基本面（美股為主，台股參考）</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
+      <!-- 營收成長 -->
+      <div class="cond-chip" id="chip-rev">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-rev" onchange="toggleChip('rev')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--accent)">💰 營收年增率 &gt; 0</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">YoY Revenue Growth 正成長</div>
+          </div>
+        </div>
+      </div>
+      <!-- EPS成長 -->
+      <div class="cond-chip" id="chip-eps">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-eps" onchange="toggleChip('eps')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--yellow)">📈 EPS 年增率 &gt; 0</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">YoY Earnings Growth 正成長</div>
+          </div>
+        </div>
       </div>
       <!-- 評分 -->
       <div class="cond-chip" id="chip-score">
         <div style="display:flex;align-items:center;gap:8px">
           <label class="chip-toggle"><input type="checkbox" id="ck-score" onchange="toggleChip('score')"><span class="chip-slider"></span></label>
           <div style="flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--accent)">🏆 綜合評分</div>
-            <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
-              <span style="font-size:10px;color:var(--text3)">評分 ≥</span>
-              <input type="number" id="score-min" value="60" min="0" max="100" style="width:50px;font-size:11px">
-              <span style="font-size:10px;color:var(--text3)">分</span>
+            <div style="font-size:11px;font-weight:600;color:var(--accent)">🏆 技術評分 ≥</div>
+            <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+              <input type="number" id="score-min" value="60" min="0" max="100" style="width:46px;font-size:11px">
+              <span style="font-size:9px;color:var(--text3)">分（滿分100）</span>
             </div>
           </div>
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:5px">多指標綜合評估（滿分100）</div>
       </div>
     </div>
+
     <!-- 篩選結果 -->
     <div id="screenResult" style="display:none">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -478,7 +526,12 @@ select option{background:var(--bg2)}
     </div>
     <div id="screenLoading" style="display:none;text-align:center;padding:24px">
       <div class="spinner" style="margin:0 auto 10px"></div>
-      <div style="font-size:12px;color:var(--text3)">正在用技術指標掃描股票庫，約需 15–30 秒…</div>
+      <div style="font-size:12px;color:var(--text3)" id="screenLoadMsg">正在用技術指標掃描股票庫，約需 15–45 秒…</div>
+    </div>
+    <div id="screenError" style="display:none;padding:12px;background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.2);border-radius:8px;margin-top:8px">
+      <div style="font-size:12px;color:var(--red);font-weight:600">⚠ 篩選失敗</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px" id="screenErrMsg">—</div>
+      <button class="btn btn-sm" style="margin-top:8px;font-size:11px" onclick="wakeAndScreen()">🔄 重試（預熱伺服器）</button>
     </div>
   </div>
 
@@ -668,45 +721,45 @@ select option{background:var(--bg2)}
       </div>
     </div>
   </div>
-</div>
 
-<!-- ===== PERFORMANCE ===== -->
-<div class="page" id="page-performance">
-  <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;letter-spacing:1px;margin-bottom:16px">◈ 績效統計（回測數據）</div>
-  <div class="g4 mb20">
-    <div class="scard"><div class="sglw g"></div><div class="slabel">MA+RSI 勝率</div><div class="sval up" id="p-wr1">—</div><div class="ssub">目標 ≥ 60%</div></div>
-    <div class="scard"><div class="sglw g"></div><div class="slabel">MACD 勝率</div><div class="sval up" id="p-wr2">—</div><div class="ssub">目標 ≥ 60%</div></div>
-    <div class="scard"><div class="sglw b"></div><div class="slabel">KD+RSI 勝率</div><div class="sval neutral" id="p-wr3">—</div><div class="ssub">目標 ≥ 60%</div></div>
-    <div class="scard"><div class="sglw y"></div><div class="slabel">最佳策略</div><div class="sval" style="color:var(--yellow);font-size:16px" id="p-best">—</div><div class="ssub">綜合評估</div></div>
-  </div>
-  <div class="g2 gap mb20">
-    <div class="card">
-      <div class="ctitle">🎯 勝率環形圖</div>
-      <div class="ring-wrap">
-        <div class="ring">
-          <svg viewBox="0 0 110 110" width="110" height="110">
-            <circle cx="55" cy="55" r="44" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="11"/>
-            <circle cx="55" cy="55" r="44" fill="none" stroke="var(--accent)" stroke-width="11"
-              stroke-dasharray="276" id="ringStroke" stroke-dashoffset="100" stroke-linecap="round"
-              transform="rotate(-90 55 55)" style="filter:drop-shadow(0 0 5px var(--accent));transition:stroke-dashoffset 1s ease"/>
-          </svg>
-          <div class="ring-center"><div class="ring-val" id="ringVal">—</div><div class="ring-lbl">平均勝率</div></div>
+  <!-- ===== 績效統計（內嵌於策略積木頁） ===== -->
+  <div id="perfSection" style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border2)">
+    <div style="font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;margin-bottom:16px;color:var(--accent)">◈ 績效統計（回測數據）</div>
+    <div class="g4 mb20">
+      <div class="scard"><div class="sglw g"></div><div class="slabel">MA+RSI 勝率</div><div class="sval up" id="p-wr1">—</div><div class="ssub">目標 ≥ 60%</div></div>
+      <div class="scard"><div class="sglw g"></div><div class="slabel">MACD 勝率</div><div class="sval up" id="p-wr2">—</div><div class="ssub">目標 ≥ 60%</div></div>
+      <div class="scard"><div class="sglw b"></div><div class="slabel">KD+RSI 勝率</div><div class="sval neutral" id="p-wr3">—</div><div class="ssub">目標 ≥ 60%</div></div>
+      <div class="scard"><div class="sglw y"></div><div class="slabel">最佳策略</div><div class="sval" style="color:var(--yellow);font-size:16px" id="p-best">—</div><div class="ssub">綜合評估</div></div>
+    </div>
+    <div class="g2 gap mb20">
+      <div class="card">
+        <div class="ctitle">🎯 勝率環形圖</div>
+        <div class="ring-wrap">
+          <div class="ring">
+            <svg viewBox="0 0 110 110" width="110" height="110">
+              <circle cx="55" cy="55" r="44" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="11"/>
+              <circle cx="55" cy="55" r="44" fill="none" stroke="var(--accent)" stroke-width="11"
+                stroke-dasharray="276" id="ringStroke" stroke-dashoffset="100" stroke-linecap="round"
+                transform="rotate(-90 55 55)" style="filter:drop-shadow(0 0 5px var(--accent));transition:stroke-dashoffset 1s ease"/>
+            </svg>
+            <div class="ring-center"><div class="ring-val" id="ringVal">—</div><div class="ring-lbl">平均勝率</div></div>
+          </div>
+          <div style="flex:1">
+            <div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">MA+RSI</span><span class="mono" style="color:var(--accent)" id="pbar1-v">—</span></div><div class="pbar"><div class="pfill g" id="pbar1" style="width:0%"></div></div></div>
+            <div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">MACD動能</span><span class="mono" style="color:var(--accent)" id="pbar2-v">—</span></div><div class="pbar"><div class="pfill g" id="pbar2" style="width:0%"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">KD+RSI</span><span class="mono" style="color:var(--accent)" id="pbar3-v">—</span></div><div class="pbar"><div class="pfill g" id="pbar3" style="width:0%"></div></div></div>
+          </div>
         </div>
-        <div style="flex:1">
-          <div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">MA+RSI</span><span class="mono" style="color:var(--accent)" id="pbar1-v">—</span></div><div class="pbar"><div class="pfill g" id="pbar1" style="width:0%"></div></div></div>
-          <div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">MACD動能</span><span class="mono" style="color:var(--accent)" id="pbar2-v">—</span></div><div class="pbar"><div class="pfill g" id="pbar2" style="width:0%"></div></div></div>
-          <div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">KD+RSI</span><span class="mono" style="color:var(--accent)" id="pbar3-v">—</span></div><div class="pbar"><div class="pfill g" id="pbar3" style="width:0%"></div></div></div>
-        </div>
+      </div>
+      <div class="card">
+        <div class="ctitle">📈 策略對比</div>
+        <div id="stratCompare"><div class="loading"><div class="spinner"></div>計算中...</div></div>
       </div>
     </div>
     <div class="card">
-      <div class="ctitle">📈 策略對比</div>
-      <div id="stratCompare"><div class="loading"><div class="spinner"></div>計算中...</div></div>
+      <div class="ctitle">📋 近期交易記錄 <span class="badge" id="tradesBadge">—</span></div>
+      <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>進場日</th><th>出場日</th><th>股票</th><th>進場價</th><th>出場價</th><th>報酬率</th><th>策略</th><th>結果</th></tr></thead><tbody id="tradesTbody"><tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text3)">先執行策略積木的回測以顯示交易記錄</td></tr></tbody></table></div>
     </div>
-  </div>
-  <div class="card">
-    <div class="ctitle">📋 近期交易記錄 <span class="badge" id="tradesBadge">—</span></div>
-    <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>進場日</th><th>出場日</th><th>股票</th><th>進場價</th><th>出場價</th><th>報酬率</th><th>策略</th><th>結果</th></tr></thead><tbody id="tradesTbody"><tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text3)">先執行策略積木的回測以顯示交易記錄</td></tr></tbody></table></div>
   </div>
 </div>
 
@@ -803,7 +856,7 @@ select option{background:var(--bg2)}
   <button class="mtab active" onclick="go('dashboard');mact(this)"><span class="mtab-i">◈</span>總覽</button>
   <button class="mtab" onclick="go('strategy');mact(this)"><span class="mtab-i">⬡</span>策略</button>
   <button class="mtab" onclick="go('monitor');mact(this)"><span class="mtab-i">◉</span>監控</button>
-  <button class="mtab" onclick="go('performance');mact(this)"><span class="mtab-i">📊</span>績效</button>
+  <button class="mtab" onclick="go('performance');mact(this)"><span class="mtab-i">📊</span>績效↓</button>
   <button class="mtab" onclick="go('recommend');mact(this)"><span class="mtab-i">★</span>推薦</button>
   <button class="mtab" onclick="go('technical');mact(this)"><span class="mtab-i">⌘</span>技術</button>
 </nav>
@@ -1064,41 +1117,90 @@ function toggleChip(name){
 
 // ── 篩選器：開始篩選 ─────────────────────────────
 let _screenResults=[];
+
+function clearScreen(){
+  _screenResults=[];
+  // uncheck all chips
+  ['ck-rsi','ck-ma','ck-macd','ck-macd-weekly','ck-kd','ck-bull-align','ck-vol','ck-rev','ck-eps','ck-score'].forEach(id=>{
+    const el=$( id);
+    if(el){ el.checked=false; toggleChip(id.replace('ck-','')); }
+  });
+  $('screenResult').style.display='none';
+  $('screenError').style.display='none';
+  $('screenGrid').innerHTML='';
+  $('screenCount').textContent='0 檔';
+}
+
+async function wakeAndScreen(){
+  $('screenError').style.display='none';
+  $('screenLoading').style.display='block';
+  $('screenLoadMsg').textContent='正在預熱伺服器，請稍候…';
+  try{
+    await fetch(`${API}/health`,{signal:AbortSignal.timeout(15000)});
+  }catch(e){ /* ignore warm-up errors */ }
+  await runScreen();
+}
+
 async function runScreen(){
   const btn=$('screenBtn');
   const loading=$('screenLoading');
   const result=$('screenResult');
+  const errDiv=$('screenError');
   btn.disabled=true; btn.textContent='篩選中…';
   loading.style.display='block';
   result.style.display='none';
+  errDiv.style.display='none';
   _screenResults=[];
+
+  // dynamic loading messages
+  const msgs=['正在用技術指標掃描股票庫，約需 15–45 秒…','⚡ 正在計算 RSI / MACD / KD 指標…','📊 正在比對量能與均線條件…','🔍 快篩完了，整理結果中…'];
+  let mi=0;
+  $('screenLoadMsg').textContent=msgs[0];
+  const msgTimer=setInterval(()=>{ mi=(mi+1)%msgs.length; $('screenLoadMsg').textContent=msgs[mi]; },7000);
+
   try{
-    const body={
-      market: $('screenMarket').value,
-    };
-    if($('ck-rsi').checked){
+    const body={ market: $('screenMarket').value };
+    // 技術面
+    if($('ck-rsi')&&$('ck-rsi').checked){
       body.rsi_min=Number($('rsi-min').value||0);
       body.rsi_max=Number($('rsi-max').value||100);
     }
-    if($('ck-ma').checked)   body.ma_golden=true;
-    if($('ck-macd').checked) body.macd_golden=true;
-    if($('ck-kd').checked)   body.kd_golden=true;
-    if($('ck-vol').checked)  body.vol_ratio_min=Number($('vol-ratio').value||1);
-    if($('ck-score').checked) body.score_min=Number($('score-min').value||0);
+    if($('ck-ma')&&$('ck-ma').checked)           body.ma_golden=true;
+    if($('ck-macd')&&$('ck-macd').checked)       body.macd_golden=true;
+    if($('ck-macd-weekly')&&$('ck-macd-weekly').checked) body.macd_weekly_golden=true;
+    if($('ck-kd')&&$('ck-kd').checked)           body.kd_golden=true;
+    if($('ck-bull-align')&&$('ck-bull-align').checked)   body.bull_align=true;
+    // 量能面
+    if($('ck-vol')&&$('ck-vol').checked) body.vol_ratio_min=Number($('vol-ratio').value||1);
+    // 基本面
+    if($('ck-rev')&&$('ck-rev').checked)   body.revenue_growth=true;
+    if($('ck-eps')&&$('ck-eps').checked)   body.earnings_growth=true;
+    if($('ck-score')&&$('ck-score').checked) body.score_min=Number($('score-min').value||0);
 
     const res=await fetch(`${API}/screen`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)
+      body:JSON.stringify(body),
+      signal:AbortSignal.timeout(90000)
     });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const data=await res.json();
     _screenResults=data||[];
     renderScreenResults(_screenResults);
   }catch(e){
     console.error('Screen error',e);
-    $('screenGrid').innerHTML='<div style="color:var(--red);font-size:12px;padding:12px">篩選失敗，請確認伺服器連線</div>';
-    result.style.display='block';
+    let msg='';
+    if(e.name==='TimeoutError'||e.name==='AbortError'){
+      msg='請求逾時（伺服器可能正在休眠）。點下方「重試」按鈕預熱後再篩選。';
+    } else if(e.message&&e.message.includes('HTTP')){
+      msg=`伺服器回傳錯誤（${e.message}），請稍後再試。`;
+    } else {
+      msg='無法連線伺服器，請確認網路或點下方「重試」預熱伺服器。';
+    }
+    $('screenErrMsg').textContent=msg;
+    errDiv.style.display='block';
   }finally{
+    clearInterval(msgTimer);
     loading.style.display='none';
     btn.disabled=false; btn.textContent='🔍 開始篩選';
   }
@@ -1245,6 +1347,16 @@ async function checkServer(){
 
 // ── 頁面切換 ─────────────────────────────────────
 function go(id){
+  // 績效頁已併入策略積木頁，重新導向
+  if(id==='performance'){
+    go('strategy');
+    setTimeout(()=>{
+      loadPerformance();
+      const perfEl=document.getElementById('perfSection');
+      if(perfEl) perfEl.scrollIntoView({behavior:'smooth',block:'start'});
+    },150);
+    return;
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
   $('page-'+id).classList.add('active');
@@ -1253,7 +1365,6 @@ function go(id){
   if(id==='monitor') loadMonitor();
   if(id==='recommend') loadRecommend();
   if(id==='technical') loadTechStock();
-  if(id==='performance') loadPerformance();
 }
 function mact(btn){ document.querySelectorAll('.mtab').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
 
@@ -1853,9 +1964,14 @@ async function runBacktest(){
     $('bt-rr').textContent=data.rr_ratio+':1';
     $('btResultWrap').style.display='block';
     setTimeout(()=>drawEquityCurve('btChart',data.equity_curve),100);
-    // 更新績效頁交易記錄
+    // 更新績效欄位（交易記錄＋統計）
     updateTradesTable(data.recent_trades||[],stockId,strategy);
     updatePerformanceStats();
+    // 回測完成後自動滾動到績效欄位
+    setTimeout(()=>{
+      const perfEl=document.getElementById('perfSection');
+      if(perfEl) perfEl.scrollIntoView({behavior:'smooth',block:'start'});
+    },400);
   }catch(e){
     alert('⚠ 無法連接伺服器，請確認 server.py 已啟動');
   }finally{

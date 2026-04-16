@@ -161,6 +161,26 @@ def calc_macd(closes, fast=12, slow=26, signal=9):
         "cross": "golden" if macd_line.iloc[-1] > signal_line.iloc[-1] else "death"
     }
 
+def calc_macd_weekly(daily_closes):
+    """從日線收盤價重採樣為週線，計算 MACD Histogram 最近一週是否 > 0（翻紅）"""
+    try:
+        if len(daily_closes) < 30:
+            return False
+        s = pd.Series(daily_closes, dtype=float)
+        # 每5個交易日為一週（簡化，不依日曆）
+        weekly = s.groupby(np.arange(len(s)) // 5).last()
+        if len(weekly) < 28:
+            return False
+        ema_fast = weekly.ewm(span=12, adjust=False).mean()
+        ema_slow = weekly.ewm(span=26, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        hist = macd_line - signal_line
+        # 最後一週 histogram > 0，且比前一週大（向上）
+        return float(hist.iloc[-1]) > 0 and float(hist.iloc[-1]) > float(hist.iloc[-2])
+    except Exception:
+        return False
+
 def calc_kd(highs, lows, closes, period=9):
     highs, lows, closes = np.array(highs), np.array(lows), np.array(closes)
     rsv_list = []
@@ -684,14 +704,18 @@ def api_screen():
         return jsonify(cached)
 
     body = request.get_json() or {}
-    rsi_max       = float(body.get("rsi_max", 100))
-    rsi_min       = float(body.get("rsi_min", 0))
-    ma_golden     = body.get("ma_golden", False)
-    macd_golden   = body.get("macd_golden", False)
-    kd_golden     = body.get("kd_golden", False)
-    vol_ratio_min = float(body.get("vol_ratio_min", 0))
-    score_min     = int(body.get("score_min", 0))
-    market        = body.get("market", "tw")
+    rsi_max           = float(body.get("rsi_max", 100))
+    rsi_min           = float(body.get("rsi_min", 0))
+    ma_golden         = body.get("ma_golden", False)
+    macd_golden       = body.get("macd_golden", False)
+    macd_weekly_golden= body.get("macd_weekly_golden", False)
+    kd_golden         = body.get("kd_golden", False)
+    bull_align        = body.get("bull_align", False)   # MA5 > MA20 > MA60
+    vol_ratio_min     = float(body.get("vol_ratio_min", 0))
+    score_min         = int(body.get("score_min", 0))
+    revenue_growth    = body.get("revenue_growth", False)
+    earnings_growth   = body.get("earnings_growth", False)
+    market            = body.get("market", "tw")
 
     results = []
 
@@ -725,6 +749,13 @@ def api_screen():
             if sc < score_min: return None
             hist = fetch_tw_history(stock_id)
             closes = hist["closes"] if hist else []
+            # 新增篩選條件（需要歷史資料）
+            if macd_weekly_golden and not calc_macd_weekly(closes): return None
+            if bull_align:
+                ma_full = calc_ma(closes)
+                ma60 = ma_full.get("MA60", 0)
+                if not (ma5 > ma20 > 0 and ma20 > ma60 > 0): return None
+            # 台股無基本面API，revenue_growth/earnings_growth跳過（美股才適用）
             return {
                 "id": stock_id,
                 "name": price_data.get("name", TW_STOCKS_DB.get(stock_id, stock_id)),
@@ -783,6 +814,20 @@ def api_screen():
             if kd_golden   and not (kd.get("K", 0) > kd.get("D", 0)): return None
             if vr < vol_ratio_min: return None
             if sc < score_min: return None
+            if macd_weekly_golden and not calc_macd_weekly(closes): return None
+            if bull_align:
+                ma_full = calc_ma(closes)
+                ma60 = ma_full.get("MA60", 0)
+                if not (ma5 > ma20 > 0 and ma20 > ma60 > 0): return None
+            # 基本面：yfinance info（只做 US 股）
+            if revenue_growth or earnings_growth:
+                try:
+                    ticker_obj = yf.Ticker(sym)
+                    info = ticker_obj.info
+                    if revenue_growth and not (float(info.get("revenueGrowth") or 0) > 0): return None
+                    if earnings_growth and not (float(info.get("earningsGrowth") or 0) > 0): return None
+                except Exception:
+                    pass  # 若取不到就跳過不篩
             return {
                 "id": sym, "name": data.get("name", sym),
                 "market": "us", "price": price,
@@ -810,16 +855,16 @@ def api_screen():
     max_workers = 6 if market == "tw" else 10
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = [ex.submit(fn, s) for fn, s in tasks]
-        for future in as_completed(futures, timeout=30):
+        for future in as_completed(futures, timeout=75):
             try:
-                r = future.result(timeout=25)
+                r = future.result(timeout=60)
                 if r:
                     results.append(r)
             except Exception as e:
                 print(f"Screen future: {e}")
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
-    cache_set("screen_" + str(body), results, 120)  # 2分鐘快取
+    cache_set("screen_" + str(body), results, 300)  # 5分鐘快取
     return jsonify(results)
 
 @app.route("/")
