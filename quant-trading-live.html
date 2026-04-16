@@ -1618,31 +1618,41 @@ function renderMarketTable(data){
   }).join('');
 }
 
+// ── 即時訊號（可獨立重試）──────────────────────────
+let _signalRetryTimer=null;
+async function loadSignals(){
+  if(_signalRetryTimer){clearTimeout(_signalRetryTimer);_signalRetryTimer=null;}
+  $('signalList').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>訊號載入中…</div>';
+  try{
+    const r=await fetch(`${API}/recommend`,{signal:AbortSignal.timeout(90000)});
+    if(r.ok){
+      const d=await r.json();
+      renderSignals(Array.isArray(d)&&d.length?d:[]);
+    } else {
+      throw new Error('HTTP '+r.status);
+    }
+  }catch(e){
+    const isTimeout=(e.name==='TimeoutError'||e.name==='AbortError');
+    $('signalList').innerHTML=`
+      <div style="grid-column:1/-1;padding:16px;text-align:center">
+        <div style="font-size:22px;margin-bottom:8px">😴</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px">
+          ${isTimeout?'伺服器休眠中，正在喚醒…':'連線失敗，請稍後重試'}
+        </div>
+        <button class="btn btn-sm" onclick="loadSignals()" style="font-size:11px">🔄 重試</button>
+      </div>`;
+    // 自動重試（逾時才重試，最多等40秒）
+    if(isTimeout){
+      _signalRetryTimer=setTimeout(()=>loadSignals(),40000);
+    }
+  }
+}
+
 // ── Dashboard 載入 ────────────────────────────────
 async function loadDashboard(){
   loadIndex();loadMainChart();
   // 即時訊號：呼叫 /api/recommend 取推薦標的作為訊號來源
-  (async()=>{
-    try{
-      const r=await fetch(`${API}/recommend`,{signal:AbortSignal.timeout(35000)});
-      if(r.ok){
-        const d=await r.json();
-        renderSignals(Array.isArray(d)?d:[]);
-      } else {
-        $('signalList').innerHTML='<div style="color:var(--text3);font-size:11px;padding:12px;grid-column:1/-1">訊號取得失敗，請稍後重試</div>';
-      }
-    }catch(e){
-      console.log('Signal error:',e);
-      $('signalList').innerHTML='<div style="color:var(--text3);font-size:11px;padding:12px;grid-column:1/-1">伺服器休眠中，稍後自動重試…</div>';
-      // 30秒後靜默重試一次
-      setTimeout(async()=>{
-        try{
-          const r2=await fetch(`${API}/recommend`,{signal:AbortSignal.timeout(35000)});
-          if(r2.ok){const d2=await r2.json();renderSignals(Array.isArray(d2)?d2:[]);}
-        }catch(e2){}
-      },30000);
-    }
-  })();
+  loadSignals();
   // 市場概況表格
   try{
     const r=await fetch(`${API}/monitor`,{
@@ -1794,13 +1804,13 @@ function refreshMonitor(){ loadMonitor(); }
 
 // ── 推薦股票 ─────────────────────────────────────
 async function loadRecommend(){
-  $('recCards').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI正在分析市場...</div>';
+  $('recCards').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI正在分析市場，首次載入約需 30–60 秒…</div>';
   $('recUpdateTime').textContent='篩選中...';
   try{
-    const r=await fetch(`${API}/recommend`);
-    if(!r.ok) throw new Error('API error');
+    const r=await fetch(`${API}/recommend`,{signal:AbortSignal.timeout(90000)});
+    if(!r.ok) throw new Error('HTTP '+r.status);
     const data=await r.json();
-    if(!data||data.length===0){ $('recCards').innerHTML='<div style="color:var(--text3);padding:40px;text-align:center">無推薦數據，請確認伺服器正常運行</div>'; return; }
+    if(!data||data.length===0){ $('recCards').innerHTML='<div style="color:var(--text3);padding:40px;text-align:center">⚠ 目前無推薦數據，稍後再試</div>'; return; }
     $('recCards').innerHTML=data.map(s=>{
       const chg=s.change_pct||0;
       const score=s.score!=null?s.score:null;
@@ -1848,7 +1858,32 @@ async function loadRecommend(){
     $('recUpdateTime').textContent=`AI量化篩選 · ${now.toLocaleDateString('zh-TW')} · ${now.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`;
     // 異步載入新聞
     data.forEach(s=>loadNewsForRec(s.id,s.market));
-  }catch(e){ $('recCards').innerHTML=`<div style="color:var(--text3);padding:40px;text-align:center">⚠ 連接失敗：請確認 server.py 已啟動<br><br><code style="font-size:11px;color:var(--accent)">python server.py</code></div>`; }
+  }catch(e){
+    const isTimeout=(e.name==='TimeoutError'||e.name==='AbortError');
+    $('recCards').innerHTML=`
+      <div style="grid-column:1/-1;text-align:center;padding:32px 20px">
+        <div style="font-size:28px;margin-bottom:12px">😴</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:8px">
+          ${isTimeout?'伺服器正在從休眠中喚醒…':'連線失敗，請確認網路狀態'}
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:20px;line-height:1.7">
+          ${isTimeout
+            ?'Render.com 免費方案閒置 15 分鐘後會自動休眠。<br>通常需要 <strong style="color:var(--accent)">30–60 秒</strong>喚醒，正在自動重試…'
+            :'網路或伺服器發生錯誤，請稍後再試。'}
+        </div>
+        <button class="btn btnp" onclick="loadRecommend()" style="font-size:13px;padding:9px 20px">
+          🔄 立即重試
+        </button>
+      </div>`;
+    // 自動重試：30秒後靜默重試一次
+    if(isTimeout){
+      setTimeout(()=>{
+        if($('recCards')&&$('recCards').querySelector('.spinner')===null){
+          loadRecommend();
+        }
+      },35000);
+    }
+  }
 }
 
 async function loadNewsForRec(stockId,market){
