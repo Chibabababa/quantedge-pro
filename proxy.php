@@ -2,6 +2,7 @@
 /**
  * API Reverse Proxy
  * Routes /api/* requests to Flask backend on localhost:5000
+ * .htaccess rewrites /api/X to proxy.php?_path=X
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -13,20 +14,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// Get the path from PATH_INFO or REDIRECT_URL
-$path = '';
-if (!empty($_SERVER['PATH_INFO'])) {
-    $path = $_SERVER['PATH_INFO'];
-} elseif (!empty($_SERVER['REDIRECT_URL'])) {
-    // Strip leading /proxy.php if present
-    $path = preg_replace('#^/proxy\.php#', '', $_SERVER['REDIRECT_URL']);
-}
+// Get endpoint path (set by .htaccess RewriteRule)
+$api_path = $_GET['_path'] ?? 'health';
+
+// Build query string (exclude our internal _path param)
+$params = $_GET;
+unset($params['_path']);
+$qs = http_build_query($params);
 
 // Build target URL
-$target = 'http://127.0.0.1:5000' . $path;
-
-// Append query string if present
-$qs = $_SERVER['QUERY_STRING'] ?? '';
+$target = 'http://127.0.0.1:5000/api/' . ltrim($api_path, '/');
 if ($qs !== '') {
     $target .= '?' . $qs;
 }
@@ -36,7 +33,6 @@ $ch = curl_init($target);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_TIMEOUT, 90);
 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-curl_setopt($ch, CURLOPT_HEADER, true);
 
 // Forward POST body
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -46,24 +42,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 }
 
-$full_response = curl_exec($ch);
-$http_code     = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$header_size   = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-$curl_error    = curl_error($ch);
+$response  = curl_exec($ch);
+$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$curl_err  = curl_error($ch);
 curl_close($ch);
 
-if ($curl_error || $full_response === false) {
+header('Content-Type: application/json');
+
+if ($curl_err || $response === false) {
     http_response_code(503);
-    header('Content-Type: application/json');
-    echo json_encode([
-        'error'   => 'backend_unavailable',
-        'message' => $curl_error ?: 'No response from Flask backend'
-    ]);
+    echo json_encode(['error' => 'backend_unavailable', 'message' => $curl_err]);
     exit();
 }
 
-$body = substr($full_response, $header_size);
-
 http_response_code($http_code);
-header('Content-Type: application/json');
-echo $body;
+echo $response;

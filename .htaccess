@@ -1,7 +1,8 @@
 Options -MultiViews
 RewriteEngine On
+RewriteBase /
 
-# Route all /api/* requests to proxy.php
+# Route all /api/* requests through proxy.php
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api(/.*)?$ proxy.php$1 [L,QSA,PT]
+RewriteRule ^api/(.+)$ proxy.php?_path=$1 [L,QSA]
