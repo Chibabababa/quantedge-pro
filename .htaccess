@@ -1,0 +1,7 @@
+Options -MultiViews
+RewriteEngine On
+
+# Route all /api/* requests to proxy.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api(/.*)?$ proxy.php$1 [L,QSA,PT]
