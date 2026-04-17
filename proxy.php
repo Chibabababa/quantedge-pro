@@ -1,8 +1,8 @@
 <?php
 /**
  * API Reverse Proxy
- * Routes /api/* requests to Flask backend on localhost:5000
- * .htaccess rewrites /api/X to proxy.php?_path=X
+ * Usage: /proxy.php/api/recommend  →  localhost:5000/api/recommend
+ * PATH_INFO carries the endpoint path after proxy.php
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -14,27 +14,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// Get endpoint path (set by .htaccess RewriteRule)
-$api_path = $_GET['_path'] ?? 'health';
-
-// Build query string (exclude our internal _path param)
-$params = $_GET;
-unset($params['_path']);
-$qs = http_build_query($params);
-
-// Build target URL
-$target = 'http://127.0.0.1:5000/api/' . ltrim($api_path, '/');
-if ($qs !== '') {
-    $target .= '?' . $qs;
+// PATH_INFO = /api/recommend  (everything after proxy.php in the URL)
+$path = '';
+if (!empty($_SERVER['PATH_INFO'])) {
+    $path = $_SERVER['PATH_INFO'];
+} elseif (!empty($_SERVER['REDIRECT_URL'])) {
+    $path = preg_replace('#^/proxy\.php#', '', $_SERVER['REDIRECT_URL']);
 }
 
-// Setup cURL
-$ch = curl_init($target);
+if (empty($path)) {
+    $path = '/api/health';
+}
+
+// Build target URL
+$qs  = $_SERVER['QUERY_STRING'] ?? '';
+$url = 'http://127.0.0.1:5000' . $path . ($qs !== '' ? '?' . $qs : '');
+
+// cURL request
+$ch = curl_init($url);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_TIMEOUT, 90);
 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 
-// Forward POST body
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = file_get_contents('php://input');
     curl_setopt($ch, CURLOPT_POST, true);
