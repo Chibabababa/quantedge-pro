@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 QuantEdge Pro — 後端 API Server
-台股爬蟲 + Yahoo Finance (美股) 真實數據
+台股爬蟲 + Yahoo Finance (美股) + FinMind 真實數據
 啟動方式：python server.py
 API 地址：http://localhost:5000
 """
@@ -50,6 +50,157 @@ def cache_set(key, val, ttl=CACHE_SECONDS):
 # 限制同時對 TWSE 的請求數，避免被封鎖
 _twse_semaphore = threading.Semaphore(3)   # 最多 3 個並行 TWSE 請求
 _yf_semaphore   = threading.Semaphore(5)   # 最多 5 個並行 yfinance 請求
+
+# ─── FinMind API ─────────────────────────────────────────────
+FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiY2hpYmFiYWJhIiwiZW1haWwiOiJlYXRiYTczQGdtYWlsLmNvbSJ9.WFy4oNQD7wvqfQCKeXPUe1eQDWhBzZsxRXsicuQpVp0"
+FINMIND_BASE  = "https://api.finmindtrade.com/api/v4/data"
+
+def finmind_fetch(dataset, stock_id, start_date=None, end_date=None):
+    """通用 FinMind API 請求，失敗回傳空 list"""
+    if start_date is None:
+        start_date = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")
+    params = {
+        "dataset": dataset,
+        "data_id": stock_id,
+        "start_date": start_date,
+        "token": FINMIND_TOKEN
+    }
+    if end_date:
+        params["end_date"] = end_date
+    try:
+        r = requests.get(FINMIND_BASE, params=params, timeout=15)
+        r.raise_for_status()
+        body = r.json()
+        if body.get("status") == 200 and body.get("data"):
+            return body["data"]
+    except Exception as e:
+        print(f"FinMind {dataset} {stock_id}: {e}")
+    return []
+
+def fetch_tw_history_finmind(stock_id, months=3):
+    """從 FinMind 取台股歷史日K（比 yfinance .TW 更穩定）"""
+    cache_key = f"fm_hist_{stock_id}_{months}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    start = (datetime.now() - timedelta(days=months * 35)).strftime("%Y-%m-%d")
+    rows = finmind_fetch("TaiwanStockPrice", stock_id, start_date=start)
+    if not rows or len(rows) < 5:
+        return None
+    rows = sorted(rows, key=lambda x: x["date"])
+    result = {
+        "dates":   [r["date"] for r in rows],
+        "opens":   [round(float(r.get("open",  r["close"])), 2) for r in rows],
+        "highs":   [round(float(r.get("max",   r["close"])), 2) for r in rows],
+        "lows":    [round(float(r.get("min",   r["close"])), 2) for r in rows],
+        "closes":  [round(float(r["close"]), 2) for r in rows],
+        "volumes": [int(r.get("Trading_Volume", 0)) for r in rows]
+    }
+    cache_set(cache_key, result, 300)
+    return result
+
+def fetch_tw_revenue_yoy(stock_id):
+    """月營收年增率（FinMind）— 最新月份 > 去年同期 → True"""
+    cache_key = f"fm_rev_{stock_id}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+    start = (datetime.now() - timedelta(days=420)).strftime("%Y-%m-%d")
+    rows = finmind_fetch("TaiwanStockMonthRevenue", stock_id, start_date=start)
+    if len(rows) < 13:
+        cache_set(cache_key, False, 21600)
+        return False
+    rows = sorted(rows, key=lambda x: (int(x.get("revenue_year", 0)), int(x.get("revenue_month", 0))))
+    latest = rows[-1]
+    target_year  = int(latest.get("revenue_year",  0)) - 1
+    target_month = int(latest.get("revenue_month", 0))
+    prev = next((r for r in rows
+                 if int(r.get("revenue_year", 0))  == target_year
+                 and int(r.get("revenue_month", 0)) == target_month), None)
+    result = bool(prev and float(latest.get("revenue", 0)) > float(prev.get("revenue", 0)))
+    cache_set(cache_key, result, 21600)
+    return result
+
+def fetch_tw_eps_yoy(stock_id):
+    """EPS 年增率（FinMind）— 最新季EPS > 去年同季 → True"""
+    cache_key = f"fm_eps_{stock_id}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+    start = (datetime.now() - timedelta(days=550)).strftime("%Y-%m-%d")
+    rows = finmind_fetch("TaiwanStockFinancialStatements", stock_id, start_date=start)
+    eps_rows = sorted([r for r in rows if r.get("type") == "EPS"], key=lambda x: x["date"])
+    if len(eps_rows) < 5:
+        cache_set(cache_key, False, 21600)
+        return False
+    latest_eps  = float(eps_rows[-1].get("value", 0))
+    compare_eps = float(eps_rows[-5].get("value", 0))
+    result = (latest_eps > compare_eps) and (compare_eps != 0)
+    cache_set(cache_key, result, 21600)
+    return result
+
+def fetch_tw_institutional(stock_id, days=5):
+    """三大法人近 N 日買賣超（FinMind，快取 1小時）"""
+    cache_key = f"fm_inst_{stock_id}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+    start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    rows = finmind_fetch("TaiwanStockInstitutionalInvestorsBuySell", stock_id, start_date=start)
+    empty = {"foreign_net": 0, "trust_net": 0, "dealer_net": 0,
+             "foreign_net_buy": False, "trust_net_buy": False, "three_major_net_buy": False}
+    if not rows:
+        cache_set(cache_key, empty, 3600)
+        return empty
+    rows = sorted(rows, key=lambda x: x["date"])
+    recent_dates = sorted(set(r["date"] for r in rows))[-days:]
+    recent = [r for r in rows if r["date"] in recent_dates]
+    foreign_net = trust_net = dealer_net = 0.0
+    for r in recent:
+        name = r.get("name", "")
+        net  = float(r.get("buy", 0)) - float(r.get("sell", 0))
+        if "Foreign_Investor" in name:
+            foreign_net += net
+        elif "Investment_Trust" in name:
+            trust_net += net
+        elif "Dealer" in name:
+            dealer_net += net
+    result = {
+        "foreign_net":       round(foreign_net, 0),
+        "trust_net":         round(trust_net, 0),
+        "dealer_net":        round(dealer_net, 0),
+        "foreign_net_buy":   foreign_net > 0,
+        "trust_net_buy":     trust_net > 0,
+        "three_major_net_buy": (foreign_net + trust_net + dealer_net) > 0
+    }
+    cache_set(cache_key, result, 3600)
+    return result
+
+def fetch_tw_margin(stock_id):
+    """融資融券最新狀態（FinMind，快取 1小時）"""
+    cache_key = f"fm_margin_{stock_id}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+    start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    rows = finmind_fetch("TaiwanStockMarginPurchaseShortSale", stock_id, start_date=start)
+    empty = {"margin_today": 0, "margin_change": 0, "margin_increase": False, "short_today": 0}
+    if len(rows) < 2:
+        cache_set(cache_key, empty, 3600)
+        return empty
+    rows = sorted(rows, key=lambda x: x["date"])
+    latest = rows[-1]
+    prev   = rows[-2]
+    margin_today  = int(latest.get("MarginPurchaseToday", 0))
+    margin_prev   = int(prev.get("MarginPurchaseToday", 0))
+    result = {
+        "margin_today":   margin_today,
+        "margin_change":  margin_today - margin_prev,
+        "margin_increase": (margin_today - margin_prev) > 0,
+        "short_today":    int(latest.get("ShortSaleToday", 0))
+    }
+    cache_set(cache_key, result, 3600)
+    return result
 
 # ─── 台股資料庫（篩選用，含上市+上櫃主要標的，共 ~160 支） ─────
 TW_STOCKS_DB = {
@@ -493,10 +644,18 @@ def fetch_tpex_price(stock_id):
             return None
 
 def fetch_tw_history(stock_id, months=3):
-    """用 yfinance 抓台股歷史資料（Yahoo Finance 有台股支援）"""
+    """台股歷史日K（FinMind 優先，yfinance 備援）"""
     cached = cache_get(f"hist_{stock_id}")
     if cached:
         return cached
+
+    # ── FinMind 優先（更穩定，無 .TW 後綴問題）──
+    result = fetch_tw_history_finmind(stock_id, months)
+    if result and len(result.get("closes", [])) >= 5:
+        cache_set(f"hist_{stock_id}", result, 300)
+        return result
+
+    # ── yfinance 備援 ──
     try:
         ticker = yf.Ticker(f"{stock_id}.TW")
         df = ticker.history(period=f"{months}mo")
@@ -706,18 +865,21 @@ def api_screen():
         return jsonify(cached)
 
     body = request.get_json() or {}
-    rsi_max           = float(body.get("rsi_max", 100))
-    rsi_min           = float(body.get("rsi_min", 0))
-    ma_golden         = body.get("ma_golden", False)
-    macd_golden       = body.get("macd_golden", False)
-    macd_weekly_golden= body.get("macd_weekly_golden", False)
-    kd_golden         = body.get("kd_golden", False)
-    bull_align        = body.get("bull_align", False)   # MA5 > MA20 > MA60
-    vol_ratio_min     = float(body.get("vol_ratio_min", 0))
-    score_min         = int(body.get("score_min", 0))
-    revenue_growth    = body.get("revenue_growth", False)
-    earnings_growth   = body.get("earnings_growth", False)
-    market            = body.get("market", "tw")
+    rsi_max              = float(body.get("rsi_max", 100))
+    rsi_min              = float(body.get("rsi_min", 0))
+    ma_golden            = body.get("ma_golden", False)
+    macd_golden          = body.get("macd_golden", False)
+    macd_weekly_golden   = body.get("macd_weekly_golden", False)
+    kd_golden            = body.get("kd_golden", False)
+    bull_align           = body.get("bull_align", False)      # MA5>MA20>MA60
+    vol_ratio_min        = float(body.get("vol_ratio_min", 0))
+    score_min            = int(body.get("score_min", 0))
+    revenue_growth       = body.get("revenue_growth", False)   # 月營收YoY增長
+    earnings_growth      = body.get("earnings_growth", False)  # EPS YoY增長
+    foreign_net_buy      = body.get("foreign_net_buy", False)  # 外資近5日買超
+    three_major_net_buy  = body.get("three_major_net_buy", False) # 三大法人買超
+    margin_increase      = body.get("margin_increase", False)  # 融資增加
+    market               = body.get("market", "tw")
 
     results = []
 
@@ -757,7 +919,16 @@ def api_screen():
                 ma_full = calc_ma(closes)
                 ma60 = ma_full.get("MA60", 0)
                 if not (ma5 > ma20 > 0 and ma20 > ma60 > 0): return None
-            # 台股無基本面API，revenue_growth/earnings_growth跳過（美股才適用）
+            # FinMind 基本面篩選（台股）
+            if revenue_growth and not fetch_tw_revenue_yoy(stock_id): return None
+            if earnings_growth and not fetch_tw_eps_yoy(stock_id): return None
+            # FinMind 籌碼篩選
+            if foreign_net_buy or three_major_net_buy or margin_increase:
+                inst = fetch_tw_institutional(stock_id)
+                mg   = fetch_tw_margin(stock_id)
+                if foreign_net_buy     and not inst.get("foreign_net_buy"):   return None
+                if three_major_net_buy and not inst.get("three_major_net_buy"): return None
+                if margin_increase     and not mg.get("margin_increase"):     return None
             return {
                 "id": stock_id,
                 "name": price_data.get("name", TW_STOCKS_DB.get(stock_id, stock_id)),
@@ -1428,6 +1599,45 @@ def api_backtest():
         "equity_curve": equity[-60:],
         "recent_trades": trades[-10:]
     })
+
+@app.route("/api/fundamental/<stock_id>")
+def api_fundamental(stock_id):
+    """台股基本面 + 籌碼資料（FinMind）
+    回傳：月營收年增率、EPS年增率、三大法人、融資融券
+    """
+    cached = cache_get(f"fundamental_{stock_id}")
+    if cached:
+        return jsonify(cached)
+
+    rev_yoy  = fetch_tw_revenue_yoy(stock_id)
+    eps_yoy  = fetch_tw_eps_yoy(stock_id)
+    inst     = fetch_tw_institutional(stock_id)
+    margin   = fetch_tw_margin(stock_id)
+
+    # 取月營收原始數字（最近 13 個月，顯示用）
+    start_rev = (datetime.now() - timedelta(days=420)).strftime("%Y-%m-%d")
+    rev_rows  = finmind_fetch("TaiwanStockMonthRevenue", stock_id, start_date=start_rev)
+    rev_rows  = sorted(rev_rows, key=lambda x: (int(x.get("revenue_year",0)), int(x.get("revenue_month",0))))
+    rev_chart = [{"date": f"{r.get('revenue_year')}-{str(r.get('revenue_month','0')).zfill(2)}",
+                  "revenue": int(r.get("revenue", 0))} for r in rev_rows[-13:]]
+
+    # 取 EPS 原始數字（最近 8 季）
+    start_eps = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+    eps_rows  = finmind_fetch("TaiwanStockFinancialStatements", stock_id, start_date=start_eps)
+    eps_rows  = sorted([r for r in eps_rows if r.get("type") == "EPS"], key=lambda x: x["date"])
+    eps_chart = [{"date": r["date"], "eps": float(r.get("value", 0))} for r in eps_rows[-8:]]
+
+    result = {
+        "stock_id":        stock_id,
+        "revenue_yoy":     rev_yoy,     # True/False
+        "eps_yoy":         eps_yoy,     # True/False
+        "institutional":   inst,        # foreign_net, trust_net, dealer_net ...
+        "margin":          margin,      # margin_today, margin_change ...
+        "revenue_chart":   rev_chart,   # [{date, revenue}, ...]
+        "eps_chart":       eps_chart,   # [{date, eps}, ...]
+    }
+    cache_set(f"fundamental_{stock_id}", result, 3600)  # 1小時快取
+    return jsonify(result)
 
 # ─── 啟動 ───────────────────────────────────────────────────
 if __name__ == "__main__":
