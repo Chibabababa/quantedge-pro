@@ -470,7 +470,7 @@ select option{background:var(--bg2)}
     </div>
 
     <!-- ── 基本面 ── -->
-    <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📋 基本面（美股為主，台股參考）</div>
+    <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border2)">📋 基本面（台股由 FinMind 提供）</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:8px">
       <div class="cond-chip" id="chip-rev">
         <div style="display:flex;align-items:center;gap:8px">
@@ -487,6 +487,33 @@ select option{background:var(--bg2)}
           <div style="flex:1">
             <div style="font-size:11px;font-weight:600;color:var(--yellow)">📈 EPS 年增率 &gt; 0</div>
             <div style="font-size:9px;color:var(--text3);margin-top:3px">YoY Earnings Growth 正成長</div>
+          </div>
+        </div>
+      </div>
+      <div class="cond-chip" id="chip-foreign">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-foreign" onchange="toggleChip('foreign')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--accent)">🌏 外資買超（近5日）</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">Foreign Institutional Net Buy</div>
+          </div>
+        </div>
+      </div>
+      <div class="cond-chip" id="chip-three-major">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-three-major" onchange="toggleChip('three-major')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--yellow)">🏦 三大法人買超</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">3 Institutional Investors Net Buy</div>
+          </div>
+        </div>
+      </div>
+      <div class="cond-chip" id="chip-margin">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="chip-toggle"><input type="checkbox" id="ck-margin" onchange="toggleChip('margin')"><span class="chip-slider"></span></label>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--red)">📊 融資增加</div>
+            <div style="font-size:9px;color:var(--text3);margin-top:3px">Margin Purchase Increase</div>
           </div>
         </div>
       </div>
@@ -901,11 +928,28 @@ select option{background:var(--bg2)}
         <div style="margin-top:10px" id="sd-news-wrap"></div>
       </div>
       <div>
-        <div style="font-family:Rajdhani;font-size:13px;font-weight:600;letter-spacing:1px;color:var(--accent2);margin-bottom:8px">技術指標</div>
-        <div id="sd-ind-list"><div class="loading"><div class="spinner"></div></div></div>
-        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="addToMonitorFromModal()">+ 加入監控</button>
-          <button class="btn btnp btn-sm" onclick="viewTechFromModal()">完整分析</button>
+        <!-- Modal right-panel tabs -->
+        <div style="display:flex;gap:0;margin-bottom:12px;border-bottom:1px solid var(--border2)">
+          <button id="sdtab-tech" onclick="switchModalTab('tech')" style="background:none;border:none;padding:6px 14px;font-size:11px;font-weight:600;color:var(--accent);border-bottom:2px solid var(--accent);cursor:pointer;letter-spacing:.5px">技術指標</button>
+          <button id="sdtab-fund" onclick="switchModalTab('fund')" style="background:none;border:none;padding:6px 14px;font-size:11px;font-weight:600;color:var(--text3);border-bottom:2px solid transparent;cursor:pointer;letter-spacing:.5px">📋 基本面</button>
+        </div>
+        <!-- 技術指標 panel -->
+        <div id="sdpanel-tech">
+          <div id="sd-ind-list"><div class="loading"><div class="spinner"></div></div></div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm" onclick="addToMonitorFromModal()">+ 加入監控</button>
+            <button class="btn btnp btn-sm" onclick="viewTechFromModal()">完整分析</button>
+          </div>
+        </div>
+        <!-- 基本面 panel -->
+        <div id="sdpanel-fund" style="display:none">
+          <div id="sd-fund-content">
+            <div class="loading"><div class="spinner"></div></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm" onclick="addToMonitorFromModal()">+ 加入監控</button>
+            <button class="btn btnp btn-sm" onclick="viewTechFromModal()">完整分析</button>
+          </div>
         </div>
       </div>
     </div>
@@ -943,8 +987,12 @@ function selectStock(id,market){$('globalSearch').value='';closeSearch();openSto
 let _mStock={id:'',market:''};
 async function openStockModal(id,market){
   _mStock={id,market};
+  _mFundLoaded=false;
   $('sdModal').classList.add('open');
   document.body.style.overflow='hidden';
+  // reset to tech tab
+  switchModalTab('tech');
+  $('sd-fund-content').innerHTML='<div class="loading"><div class="spinner"></div></div>';
   $('sd-id').textContent=id;
   $('sd-name').textContent='載入中...';
   $('sd-price').textContent='—';$('sd-chg').textContent='';
@@ -1005,7 +1053,92 @@ async function loadModalNews(id){
       }).join('');
   }catch(e){}
 }
-function closeStockModal(){$('sdModal').classList.remove('open');document.body.style.overflow='';}
+function closeStockModal(){$('sdModal').classList.remove('open');document.body.style.overflow='';_mFundLoaded=false;}
+let _mFundLoaded=false;
+function switchModalTab(tab){
+  const isTech=tab==='tech';
+  $('sdpanel-tech').style.display=isTech?'':'none';
+  $('sdpanel-fund').style.display=isTech?'none':'';
+  $('sdtab-tech').style.color=isTech?'var(--accent)':'var(--text3)';
+  $('sdtab-tech').style.borderBottom=isTech?'2px solid var(--accent)':'2px solid transparent';
+  $('sdtab-fund').style.color=isTech?'var(--text3)':'var(--accent)';
+  $('sdtab-fund').style.borderBottom=isTech?'2px solid transparent':'2px solid var(--accent)';
+  if(!isTech && !_mFundLoaded) loadFundamental(_mStock.id,_mStock.market);
+}
+async function loadFundamental(id,market){
+  _mFundLoaded=true;
+  const el=$('sd-fund-content');
+  if(market&&market.toLowerCase()!=='tw'){
+    el.innerHTML='<div style="color:var(--text3);text-align:center;padding:20px;font-size:12px">基本面資料僅支援台股（由 FinMind 提供）</div>';
+    return;
+  }
+  el.innerHTML='<div class="loading"><div class="spinner"></div></div>';
+  try{
+    const r=await fetch(`${API}/fundamental/${id}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d=await r.json();
+    const yesNo=(v,yes='✅ 是',no='❌ 否')=>v?`<span style="color:var(--accent)">${yes}</span>`:`<span style="color:var(--red)">${no}</span>`;
+    // Institutional summary
+    const inst=d.institutional||{};
+    const mg=d.margin||{};
+    const summaryHtml=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">
+        <div class="sd-ind-row"><span class="sd-ind-name">營收年增</span>${yesNo(d.revenue_yoy)}</div>
+        <div class="sd-ind-row"><span class="sd-ind-name">EPS年增</span>${yesNo(d.eps_yoy)}</div>
+        <div class="sd-ind-row"><span class="sd-ind-name">外資買超</span>${yesNo(inst.foreign_net_buy)}</div>
+        <div class="sd-ind-row"><span class="sd-ind-name">三大法人</span>${yesNo(inst.three_major_net_buy)}</div>
+        <div class="sd-ind-row"><span class="sd-ind-name">投信買超</span>${yesNo(inst.trust_net_buy)}</div>
+        <div class="sd-ind-row"><span class="sd-ind-name">融資增加</span>${yesNo(mg.margin_increase)}</div>
+      </div>`;
+    // Revenue chart
+    let revHtml='';
+    if(d.revenue_chart&&d.revenue_chart.labels&&d.revenue_chart.labels.length){
+      const rc=d.revenue_chart;
+      const maxVal=Math.max(...rc.values.map(Math.abs),1);
+      const bars=rc.labels.map((lbl,i)=>{
+        const v=rc.values[i]||0;const yoy=rc.yoy[i]||0;
+        const pct=Math.min(Math.round(Math.abs(v)/maxVal*100),100);
+        const col=yoy>=0?'var(--accent)':'var(--red)';
+        return `<div style="text-align:center;flex:1;min-width:28px">
+          <div style="font-size:9px;color:${col};margin-bottom:2px">${yoy>=0?'+':''}${yoy}%</div>
+          <div style="height:60px;display:flex;align-items:flex-end;justify-content:center">
+            <div style="width:14px;height:${pct}%;background:${col};border-radius:2px 2px 0 0;min-height:2px"></div>
+          </div>
+          <div style="font-size:8px;color:var(--text3);margin-top:2px;writing-mode:vertical-rl;transform:rotate(180deg);height:28px;overflow:hidden">${lbl}</div>
+        </div>`;
+      }).join('');
+      revHtml=`<div style="margin-bottom:12px">
+        <div style="font-size:10px;font-weight:600;color:var(--text3);margin-bottom:6px;letter-spacing:.5px">月營收年增率（%）</div>
+        <div style="display:flex;gap:2px;align-items:flex-end">${bars}</div>
+      </div>`;
+    }
+    // EPS chart
+    let epsHtml='';
+    if(d.eps_chart&&d.eps_chart.labels&&d.eps_chart.labels.length){
+      const ec=d.eps_chart;
+      const maxEps=Math.max(...ec.values.map(Math.abs),0.01);
+      const epsBars=ec.labels.map((lbl,i)=>{
+        const v=ec.values[i]||0;const yoy=ec.yoy[i]||0;
+        const pct=Math.min(Math.round(Math.abs(v)/maxEps*100),100);
+        const col=v>=0?'var(--yellow)':'var(--red)';
+        return `<div style="text-align:center;flex:1;min-width:28px">
+          <div style="font-size:9px;color:${col};margin-bottom:2px">${v>=0?'+':''}${v}</div>
+          <div style="height:60px;display:flex;align-items:flex-end;justify-content:center">
+            <div style="width:14px;height:${pct}%;background:${col};border-radius:2px 2px 0 0;min-height:2px"></div>
+          </div>
+          <div style="font-size:8px;color:var(--text3);margin-top:2px;writing-mode:vertical-rl;transform:rotate(180deg);height:36px;overflow:hidden">${lbl}</div>
+        </div>`;
+      }).join('');
+      epsHtml=`<div style="margin-bottom:8px">
+        <div style="font-size:10px;font-weight:600;color:var(--text3);margin-bottom:6px;letter-spacing:.5px">EPS 季報（元）</div>
+        <div style="display:flex;gap:2px;align-items:flex-end">${epsBars}</div>
+      </div>`;
+    }
+    el.innerHTML=summaryHtml+revHtml+epsHtml||'<div style="color:var(--text3);text-align:center;padding:12px;font-size:11px">暫無基本面資料</div>';
+  }catch(e){
+    el.innerHTML=`<div style="color:var(--text3);text-align:center;padding:20px;font-size:12px">⚠ 無法取得基本面資料<br><span style="font-size:10px">${e.message}</span></div>`;
+  }
+}
 function addToMonitorFromModal(){
   const{id,market}=_mStock;
   if(!monitorStocks.find(s=>s.id===id)){monitorStocks.push({id,market});saveMonitor();}
@@ -1139,7 +1272,7 @@ let _screenResults=[];
 function clearScreen(){
   _screenResults=[];
   // uncheck all chips
-  ['ck-rsi','ck-ma','ck-macd','ck-macd-weekly','ck-kd','ck-bull-align','ck-vol','ck-rev','ck-eps','ck-score'].forEach(id=>{
+  ['ck-rsi','ck-ma','ck-macd','ck-macd-weekly','ck-kd','ck-bull-align','ck-vol','ck-rev','ck-eps','ck-foreign','ck-three-major','ck-margin','ck-score'].forEach(id=>{
     const el=$( id);
     if(el){ el.checked=false; toggleChip(id.replace('ck-','')); }
   });
@@ -1193,6 +1326,9 @@ async function runScreen(){
     // 基本面
     if($('ck-rev')&&$('ck-rev').checked)   body.revenue_growth=true;
     if($('ck-eps')&&$('ck-eps').checked)   body.earnings_growth=true;
+    if($('ck-foreign')&&$('ck-foreign').checked)         body.foreign_net_buy=true;
+    if($('ck-three-major')&&$('ck-three-major').checked) body.three_major_net_buy=true;
+    if($('ck-margin')&&$('ck-margin').checked)           body.margin_increase=true;
     if($('ck-score')&&$('ck-score').checked) body.score_min=Number($('score-min').value||0);
 
     const res=await fetch(`${API}/screen`,{
