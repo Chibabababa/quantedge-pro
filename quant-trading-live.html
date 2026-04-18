@@ -870,7 +870,7 @@ select option{background:var(--bg2)}
     <div style="position:relative;user-select:none">
       <canvas id="klineChart" height="260" style="width:100%;cursor:crosshair;display:block"></canvas>
       <!-- OHLC Tooltip -->
-      <div id="klineTip" style="display:none;position:absolute;pointer-events:none;background:rgba(16,18,30,.92);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;font-size:11px;font-family:JetBrains Mono,monospace;white-space:nowrap;z-index:10;min-width:160px"></div>
+      <div id="klineTip" style="display:none;position:fixed;pointer-events:none;background:rgba(16,18,30,.95);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;font-size:11px;font-family:JetBrains Mono,monospace;white-space:nowrap;z-index:9999;min-width:160px;box-shadow:0 4px 16px rgba(0,0,0,.4)"></div>
       <!-- 事件圖例 -->
       <div id="evtLegend" style="position:absolute;top:4px;left:4px;display:flex;gap:8px;font-size:9px;pointer-events:none">
         <span style="color:#ff9f43">▲ 除息</span><span style="color:#ffd32a">▲ 除權</span><span style="color:#a29bfe">▲ 財報</span>
@@ -2223,11 +2223,13 @@ function _bindKlineEvents(){
         <span style="color:var(--text3)">漲跌</span><span style="color:${col}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>
         <span style="color:var(--text3)">量</span><span style="color:var(--text2)">${vol.toLocaleString()}</span>
       </div>`;
-    // 定位 tooltip
-    const tipW=170, barX=rect.left+(5+(barIdx+.5)*colW)*rect.width/canvas.offsetWidth;
-    const leftPx=barX+tipW+10>window.innerWidth?barX-tipW-12:barX+8;
-    tip.style.left=(leftPx-rect.left)+'px';
-    tip.style.top='10px';
+    // 定位 tooltip（position:fixed，使用 viewport 座標）
+    const tipW=170;
+    const barX=rect.left+(5+(barIdx+.5)*colW)*rect.width/canvas.offsetWidth;
+    const leftPx=barX+tipW+14>window.innerWidth?barX-tipW-10:barX+10;
+    const topPx=Math.max(8,rect.top+8);
+    tip.style.left=leftPx+'px';
+    tip.style.top=topPx+'px';
     tip.style.display='block';
   });
   // 點外部關閉 tooltip
