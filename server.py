@@ -1255,34 +1255,27 @@ def api_monitor():
         cache_set(cache_key, results, 30)
     return jsonify(results)
 
-@app.route("/api/recommend")
-def api_recommend():
-    """今日推薦股票（台股 + 美股，並行抓取，10分鐘快取）"""
-    cached = cache_get("recommend")
-    if cached:
-        return jsonify(cached)
 
-    # 擴大候選池：從 TW_STOCKS_DB 隨機抽 20 支 + 固定核心 + 美股 8 支
-    # 每次推薦會輪替不同個股，增加多樣性
+# ─── 推薦股票計算（可從背景執行緒呼叫）─────────────────────────────────
+_recommend_warming = False   # 防止同時多次背景計算
+_recommend_lock    = threading.Lock()
+
+def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
+    """計算今日推薦股票（耗時操作，應在背景執行）"""
     import random as _rnd
-    _rnd.seed(datetime.now().toordinal())  # 每天換一組
+    _rnd.seed(datetime.now().toordinal())
+
     core_tw = ["2330", "0050", "2317", "2454", "2412", "2881", "2603", "6505"]
     pool_tw = [s for s in TW_STOCKS_DB if s not in core_tw]
     extra_tw = _rnd.sample(pool_tw, min(12, len(pool_tw)))
-    tw_candidates = core_tw + extra_tw  # 最多 20 支
+    tw_candidates = core_tw + extra_tw
 
     core_us = ["NVDA", "AAPL", "MSFT", "META", "TSLA"]
     pool_us = [s for s in US_STOCKS_SCREEN if s not in core_us]
     extra_us = _rnd.sample(pool_us, min(5, len(pool_us)))
-    us_candidates = core_us + extra_us  # 最多 10 支
+    us_candidates = core_us + extra_us
 
     results = []
-
-    # Item8: 從請求中讀取目標倍數（前端可傳 tw_tp, tw_sl, us_tp, us_sl）
-    tw_tp = float(request.args.get("tw_tp", 0.08))  # 預設台股+8%
-    tw_sl = float(request.args.get("tw_sl", 0.05))  # 預設台股-5%
-    us_tp = float(request.args.get("us_tp", 0.10))  # 預設美股+10%
-    us_sl = float(request.args.get("us_sl", 0.05))  # 預設美股-5%
 
     def fetch_tw(stock_id):
         try:
@@ -1297,7 +1290,6 @@ def api_recommend():
             hist = fetch_tw_history(stock_id)
             closes = hist["closes"] if hist else []
             price = price_data["price"]
-            # ATR 動態目標價（優先）；ATR 不可用則退回百分比
             atr = ind.get("ATR14", 0)
             if atr and atr > 0:
                 target    = round(price + atr * 2, 1)
@@ -1313,7 +1305,7 @@ def api_recommend():
                 "change_pct": price_data.get("change_pct", 0),
                 "target": target,
                 "stop_loss": stop_loss,
-                "score": ind.get("score"),   # None = 資料不足，前端顯示 —
+                "score": ind.get("score"),
                 "winrate": ind.get("winrate"),
                 "action": ind.get("action", "觀察"),
                 "signals": ind.get("signals", []),
@@ -1347,7 +1339,6 @@ def api_recommend():
             winrate, action, signals = winrate_signal(
                 rsi, macd["cross"], kd["K"], kd["D"], price, ma5, ma20,
                 closes=closes, highs=highs_r, lows=lows_r, strategy="MA_RSI")
-            # ATR 動態目標價
             if atr and atr > 0:
                 target    = round(price + atr * 2, 2)
                 stop_loss = round(price - atr * 1.5, 2)
@@ -1377,22 +1368,77 @@ def api_recommend():
             print(f"Recommend US error {sym}: {e}")
             return None
 
-    # 並行抓取台股 + 美股
     all_tasks = [(fetch_tw, s) for s in tw_candidates] + [(fetch_us, s) for s in us_candidates]
     with ThreadPoolExecutor(max_workers=12) as ex:
         futures = [ex.submit(fn, s) for fn, s in all_tasks]
-        for future in as_completed(futures, timeout=25):
+        for future in as_completed(futures, timeout=60):
             try:
-                r = future.result(timeout=20)
+                r = future.result(timeout=30)
                 if r:
                     results.append(r)
             except Exception as e:
                 print(f"Recommend future error: {e}")
 
-    # 依評分排序
-    results.sort(key=lambda x: x.get("score", 0), reverse=True)
-    cache_set("recommend", results, 600)  # 10分鐘快取
-    return jsonify(results)
+    results.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
+    cache_set("recommend", results, 600)
+    print(f"[Recommend] 快取更新完畢，共 {len(results)} 檔")
+    return results
+
+def _bg_warm_recommend():
+    """背景執行緒：預熱推薦快取，啟動後延遲 5 秒執行，之後每 10 分鐘更新"""
+    global _recommend_warming
+    time.sleep(5)           # 讓 Flask 完全啟動後再開始
+    while True:
+        with _recommend_lock:
+            if _recommend_warming:
+                time.sleep(30)
+                continue
+            _recommend_warming = True
+        try:
+            _compute_recommend_data()
+        except Exception as e:
+            print(f"[Recommend] 背景預熱失敗: {e}")
+        finally:
+            with _recommend_lock:
+                _recommend_warming = False
+        time.sleep(600)     # 10 分鐘後再更新
+
+# 在 module 載入時啟動背景執行緒（gunicorn fork 後每個 worker 各跑一條）
+_warm_thread = threading.Thread(target=_bg_warm_recommend, daemon=True)
+_warm_thread.start()
+
+
+@app.route("/api/recommend")
+def api_recommend():
+    """今日推薦股票 — 優先回傳快取，無快取時觸發背景計算並立即回傳空陣列"""
+    cached = cache_get("recommend")
+    if cached:
+        return jsonify(cached)
+
+    # 快取尚未就緒：觸發一次背景計算（若尚未在跑）
+    def _trigger():
+        global _recommend_warming
+        with _recommend_lock:
+            if _recommend_warming:
+                return
+            _recommend_warming = True
+        try:
+            _compute_recommend_data()
+        except Exception as e:
+            print(f"[Recommend] 觸發計算失敗: {e}")
+        finally:
+            with _recommend_lock:
+                _recommend_warming = False
+
+    # 非阻塞觸發
+    t = threading.Thread(target=_trigger, daemon=True)
+    t.start()
+
+    # 立即回傳「預熱中」的空陣列 + 特殊 header 讓前端知道要重試
+    from flask import make_response
+    resp = make_response(jsonify([]), 200)
+    resp.headers["X-Warming"] = "1"
+    return resp
 
 @app.route("/api/news/<stock_id>")
 def api_news(stock_id):
