@@ -59,7 +59,7 @@ main{flex:1;max-width:1400px;margin:0 auto;padding:18px 16px;width:100%}
 @media(max-width:1100px){.g4{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:880px){.g3{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.g2,.g3,.g4{grid-template-columns:1fr}}
-.mb16{margin-bottom:16px}.mb20{margin-bottom:20px}.gap{gap:20px}
+.mb16{margin-bottom:16px}.mb20{margin-bottom:20px}.mt16{margin-top:16px}.gap{gap:20px}
 
 /* STAT CARDS */
 .scard{background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;position:relative;overflow:hidden}
@@ -845,9 +845,25 @@ select option{background:var(--bg2)}
   </div>
 
   <div class="card mb20">
-    <div class="ctitle" id="techChartTitle">📊 K線圖</div>
-    <canvas id="klineChart" height="220" style="width:100%"></canvas>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div class="ctitle" id="techChartTitle" style="margin-bottom:0">📊 K線圖</div>
+      <button id="evtToggleBtn" onclick="toggleEventMarkers()" title="顯示/隱藏重大事件標記"
+        style="background:rgba(162,155,254,.15);border:1px solid rgba(162,155,254,.4);color:#a29bfe;font-size:10px;padding:4px 10px;border-radius:5px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <span id="evtToggleIcon">🔖</span> <span id="evtToggleTxt">重大事件</span>
+      </button>
+    </div>
+    <div style="position:relative">
+      <canvas id="klineChart" height="220" style="width:100%"></canvas>
+      <!-- 事件圖例 -->
+      <div id="evtLegend" style="position:absolute;top:4px;left:4px;display:flex;gap:8px;font-size:9px;pointer-events:none">
+        <span style="color:#ff9f43">▲ 除息</span>
+        <span style="color:#ffd32a">▲ 除權</span>
+        <span style="color:#a29bfe">▲ 財報</span>
+      </div>
+    </div>
     <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace" id="klineLabels"></div>
+    <!-- 事件清單（摺疊顯示） -->
+    <div id="evtList" style="display:none;margin-top:8px;border-top:1px solid var(--border2);padding-top:8px;max-height:80px;overflow-y:auto"></div>
   </div>
 
   <div class="g2 gap">
@@ -877,9 +893,17 @@ select option{background:var(--bg2)}
       <div class="card">
         <div class="ctitle">💡 AI 操作建議</div>
         <div style="font-size:12px;line-height:1.9;color:var(--text2)" id="techAdvice">查詢股票後顯示操作建議...</div>
-        <div id="techNewsWrap" style="margin-top:10px;border-top:1px solid var(--border2);padding-top:10px"></div>
       </div>
     </div>
+  </div>
+
+  <!-- ── 新聞卡（獨立全寬） ── -->
+  <div class="card mt16" id="techNewsCard" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="ctitle" style="margin-bottom:0">📰 相關新聞 <span id="techNewsCount" class="badge"></span></div>
+      <span style="font-size:10px;color:var(--text3)">點標題開啟原文</span>
+    </div>
+    <div id="techNewsWrap"></div>
   </div>
 </div>
 
@@ -1631,8 +1655,53 @@ function drawLineChart(canvasId,labelsId,closes,dates){
   }
 }
 
-function drawKlineChart(canvasId,labelsId,hist){
+// ── 事件標記全域狀態 ────────────────────────────────
+let _techEvents=[], _showEvents=true, _lastHistData=null, _lastHistCanvas='', _lastHistLabels='';
+
+function toggleEventMarkers(){
+  _showEvents=!_showEvents;
+  const btn=$('evtToggleBtn');const leg=$('evtLegend');const evList=$('evtList');
+  if(btn){
+    btn.style.background=_showEvents?'rgba(162,155,254,.15)':'rgba(60,60,80,.3)';
+    btn.style.borderColor=_showEvents?'rgba(162,155,254,.4)':'rgba(100,100,120,.4)';
+    btn.style.color=_showEvents?'#a29bfe':'var(--text3)';
+    $('evtToggleTxt').textContent=_showEvents?'重大事件':'重大事件（關）';
+  }
+  if(leg) leg.style.display=_showEvents?'flex':'none';
+  if(evList) evList.style.display=_showEvents&&_techEvents.length?'block':'none';
+  // 重繪K線
+  if(_lastHistData) drawKlineChart(_lastHistCanvas,_lastHistLabels,_lastHistData,_showEvents?_techEvents:[]);
+}
+
+async function loadStockEvents(id,market){
+  _techEvents=[];
+  if(!id||market==='us') return; // 目前只支援台股
+  try{
+    const r=await fetch(`${API}/events/${id}`,{signal:AbortSignal.timeout(20000)});
+    if(!r.ok) return;
+    const evts=await r.json();
+    _techEvents=Array.isArray(evts)?evts:[];
+    // 更新事件清單
+    const evList=$('evtList');
+    if(evList&&_techEvents.length&&_showEvents){
+      evList.style.display='block';
+      evList.innerHTML=_techEvents.map(e=>
+        `<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:11px;border-bottom:1px solid var(--border2)">
+          <span style="background:${e.color}22;color:${e.color};font-size:9px;padding:2px 6px;border-radius:3px;white-space:nowrap">${e.label}</span>
+          <span style="color:var(--text3);font-family:JetBrains Mono;font-size:10px">${e.date}</span>
+          <span style="color:var(--text2)">${e.desc}</span>
+        </div>`
+      ).join('');
+    }
+    // 重繪K線加事件標記
+    if(_lastHistData) drawKlineChart(_lastHistCanvas,_lastHistLabels,_lastHistData,_techEvents);
+  }catch(e){ console.log('Events load error',e); }
+}
+
+function drawKlineChart(canvasId,labelsId,hist,events){
   const canvas=$(canvasId); if(!canvas||!hist) return;
+  // 儲存以便 toggle 時重繪
+  if(canvasId==='klineChart'){ _lastHistData=hist; _lastHistCanvas=canvasId; _lastHistLabels=labelsId; }
   const{closes,opens,highs,lows,dates}=hist;
   if(!closes||closes.length<2) return;
   const ctx=canvas.getContext('2d');
@@ -1682,6 +1751,35 @@ function drawKlineChart(canvasId,labelsId,hist){
     const bot=toY(Math.min(opens[ii],closes[ii]));
     ctx.fillRect(x,top,bw,Math.max(bot-top,2));
     ctx.strokeRect(x,top,bw,Math.max(bot-top,2));
+  }
+  // ── 事件標記 ────────────────────────────────────
+  if(events&&events.length&&dates){
+    const showDates=dates.slice(-showN);
+    events.forEach(ev=>{
+      const idx=showDates.findIndex(d=>d&&d.slice(0,10)===ev.date);
+      if(idx<0) return;
+      const x=20+(idx+0.5)*colW;
+      const color=ev.color||'#a29bfe';
+      // 垂直虛線
+      ctx.save();
+      ctx.setLineDash([3,3]);
+      ctx.strokeStyle=color+'99';
+      ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(x,18); ctx.lineTo(x,H-18); ctx.stroke();
+      ctx.restore();
+      // 三角旗標（底部）
+      ctx.fillStyle=color;
+      ctx.beginPath();
+      ctx.moveTo(x-5,H-18); ctx.lineTo(x+5,H-18); ctx.lineTo(x,H-10); ctx.closePath();
+      ctx.fill();
+      // 標籤文字
+      ctx.fillStyle=color;
+      ctx.font='bold 8px sans-serif';
+      ctx.textAlign='center';
+      ctx.textBaseline='bottom';
+      ctx.fillText(ev.label,x,H-19);
+    });
+    ctx.textAlign='start'; ctx.textBaseline='alphabetic';
   }
   // Labels
   if(labelsId&&$(labelsId)&&dates){
@@ -2072,6 +2170,9 @@ async function loadTechStock(){
   $('techWinrate').textContent='—';
   $('techATR').textContent='—';
   $('techAction').innerHTML='<span class="tag tg">—</span>';
+  _techEvents=[]; _lastHistData=null;
+  const evListEl=$('evtList'); if(evListEl) evListEl.style.display='none';
+  const newsCard=$('techNewsCard'); if(newsCard) newsCard.style.display='none';
   // 清除舊圖，避免顯示上一支股票的 K 線
   const kc=$('klineChart'); if(kc){const ctx=kc.getContext('2d');ctx.clearRect(0,0,kc.width,kc.height);}
   $('klineLabels').innerHTML='';
@@ -2142,8 +2243,9 @@ async function loadTechStock(){
       · 目標二（ATR×4）：<span class="mono" style="color:var(--accent)">$${fmtN(target2)}</span>（${t2Pct>0?'+':''}${t2Pct}%）<br>
       · 停損（ATR×1.5）：<span class="mono" style="color:var(--red)">$${fmtN(stopLoss)}</span>（${slPct}%）<br>
       · 策略勝率：<span class="mono" style="color:var(--accent)">${wr}%</span>`;
-    // News
+    // News + 事件標記（非同步，不擋主流程）
     loadNewsForTech(id,market);
+    loadStockEvents(id,market);
   }catch(e){
     const isNotFound=e.message&&e.message.startsWith('NOT_FOUND:');
     const isTimeout=(e.name==='TimeoutError'||e.name==='AbortError');
@@ -2158,20 +2260,41 @@ async function loadTechStock(){
 }
 
 async function loadNewsForTech(id,market){
-  const el=$('techNewsWrap'); if(!el) return;
+  const el=$('techNewsWrap');
+  const card=$('techNewsCard');
+  const countEl=$('techNewsCount');
+  if(!el) return;
+  el.innerHTML='<div class="loading"><div class="spinner"></div></div>';
+  if(card) card.style.display='block';
   try{
-    const r=await fetch(`${API}/news/${id}`); if(!r.ok) return;
+    const r=await fetch(`${API}/news/${id}`,{signal:AbortSignal.timeout(20000)}); if(!r.ok) return;
     const news=await r.json();
-    if(!news||news.length===0){ el.innerHTML=''; return; }
-    el.innerHTML='<div style="font-size:10px;color:var(--text3);margin-bottom:6px">相關新聞</div>'+
-      news.slice(0,3).map(n=>{
-        const sClass=n.sentiment==='positive'?'tg':n.sentiment==='negative'?'tr':'tb';
-        const sText=n.sentiment==='positive'?'利多':n.sentiment==='negative'?'利空':'中性';
-        return `<div class="nitem"><span class="tag ${sClass}" style="font-size:9px">${sText}</span>
-          <div><div class="ntitle"><a href="${n.link}" target="_blank">${n.title}</a></div>
-          <div class="nmeta"><span>${n.publisher}</span><span>${n.time}</span></div></div></div>`;
-      }).join('');
-  }catch(e){}
+    if(!news||news.length===0){
+      el.innerHTML='<div style="color:var(--text3);padding:12px;text-align:center;font-size:12px">暫無相關新聞</div>';
+      if(countEl) countEl.textContent='';
+      return;
+    }
+    if(countEl) countEl.textContent=`${news.length} 則`;
+    el.innerHTML=news.slice(0,10).map((n,i)=>{
+      const sClass=n.sentiment==='positive'?'tg':n.sentiment==='negative'?'tr':'tb';
+      const sText=n.sentiment==='positive'?'📈 利多':n.sentiment==='negative'?'📉 利空':'⚪ 中性';
+      return `<div class="nitem" style="${i===0?'':''}">
+        <div style="flex-shrink:0;padding-top:2px">
+          <span class="tag ${sClass}" style="font-size:9px;white-space:nowrap">${sText}</span>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="ntitle"><a href="${n.link}" target="_blank" style="font-size:12px">${n.title}</a></div>
+          <div class="nmeta" style="margin-top:4px">
+            <span style="color:var(--accent2);font-weight:600">${n.publisher||'未知來源'}</span>
+            <span>🕐 ${n.time||'—'}</span>
+            <a href="${n.link}" target="_blank" style="color:var(--text3);text-decoration:underline;font-size:10px">原文連結 ↗</a>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML='<div style="color:var(--text3);padding:12px;text-align:center;font-size:12px">新聞載入失敗</div>';
+  }
 }
 
 // ── 策略積木 ─────────────────────────────────────

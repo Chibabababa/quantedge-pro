@@ -1459,7 +1459,7 @@ def api_news(stock_id):
     try:
         ticker = yf.Ticker(f"{stock_id}.TW" if len(stock_id) == 4 and stock_id.isdigit() else stock_id)
         news = ticker.news or []
-        for n in news[:5]:
+        for n in news[:10]:
             title = n.get("title", "")
             link = n.get("link", "#")
             pub = n.get("providerPublishTime", 0)
@@ -1510,6 +1510,69 @@ def api_news(stock_id):
         print(f"News fetch error {stock_id}: {e}")
     cache_set(f"news_{stock_id}", news_list, 600)
     return jsonify(news_list)
+
+@app.route("/api/events/<stock_id>")
+def api_events(stock_id):
+    """台股重大事件（除權息、財報日）— FinMind 資料，1小時快取"""
+    cached = cache_get(f"events_{stock_id}")
+    if cached is not None:
+        return jsonify(cached)
+
+    events = []
+    today     = datetime.now()
+    yr_ago    = (today - timedelta(days=400)).strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
+
+    # ── 除權息 ─────────────────────────────────
+    try:
+        div_rows = finmind_fetch("TaiwanStockDividend", stock_id, start_date=yr_ago)
+        seen = set()
+        for row in (div_rows or []):
+            cash      = float(row.get("CashDividend", 0) or 0)
+            stock_div = float(row.get("StockDividend", 0) or 0)
+            ex_div    = (row.get("ExDividendTradingDate") or "").strip()
+            ex_right  = (row.get("ExRightTradingDate")   or "").strip()
+            if ex_div and yr_ago <= ex_div <= today_str and ex_div not in seen:
+                seen.add(ex_div)
+                events.append({
+                    "date": ex_div, "type": "dividend",
+                    "label": "息", "color": "#ff9f43",
+                    "desc": f"除息 每股${cash:.2f}"
+                })
+            if ex_right and yr_ago <= ex_right <= today_str and ex_right not in seen:
+                seen.add(ex_right)
+                events.append({
+                    "date": ex_right, "type": "right",
+                    "label": "權", "color": "#ffd32a",
+                    "desc": f"除權 {stock_div:.4g}股"
+                })
+    except Exception as e:
+        print(f"[Events] dividend {stock_id}: {e}")
+
+    # ── 財報日（季報）─────────────────────────────
+    try:
+        fs_rows = finmind_fetch("TaiwanStockFinancialStatements", stock_id, start_date=yr_ago)
+        # 依 date 分組取唯一
+        fs_map = {}
+        for row in (fs_rows or []):
+            d = (row.get("date") or "").strip()
+            if d and yr_ago <= d <= today_str and d not in fs_map:
+                t = row.get("type", "")
+                # type 欄位為 "Q1"/"Q2"/"Q3"/"Q4" 或空字串
+                fs_map[d] = t if t else "財報"
+        for d, q in sorted(fs_map.items()):
+            events.append({
+                "date": d, "type": "earnings",
+                "label": "財", "color": "#a29bfe",
+                "desc": f"財報公告 {q}"
+            })
+    except Exception as e:
+        print(f"[Events] earnings {stock_id}: {e}")
+
+    events.sort(key=lambda x: x["date"])
+    cache_set(f"events_{stock_id}", events, 3600)
+    return jsonify(events)
+
 
 @app.route("/api/strategy_winrate")
 def api_strategy_winrate():
