@@ -1374,9 +1374,34 @@ _recommend_warming = False   # 防止同時多次背景計算
 _recommend_lock    = threading.Lock()
 
 def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
-    """計算推薦股票：掃描全部台股 & 美股候選池，各取前10（依評分排序）"""
-    # 全量掃描，不隨機抽樣
-    tw_candidates = list(TW_STOCKS_DB.keys())
+    """計算推薦股票：掃描核心台股60檔 & 美股候選池，各取前10（依評分排序）"""
+    # 核心60檔台股（流動性佳、各產業代表）
+    TW_CORE = [
+        # 半導體
+        "2330","2454","2303","3034","2379","3711","6770","2449","3443","2337",
+        # 電子/科技
+        "2317","2382","2357","2353","3008","2395","4938","2324","3231","2377",
+        "6669","3035","6488","2301","3017",
+        # 金融
+        "2881","2882","2891","2886","2884","2885","2892","5880","2880","2887",
+        # 航運
+        "2615","2603","2609","2610","2618",
+        # 石化/材料
+        "1301","1303","1326","6505",
+        # 鋼鐵/傳產
+        "2002","1101","1216","2027",
+        # 電信
+        "2412","4904","3045",
+        # 生技
+        "4119","1795","4164",
+        # 消費/零售
+        "2207","2912","9910","9914","9921",
+        # 網通
+        "2345","6245",
+        # ETF
+        "0050","0056","00878",
+    ]
+    tw_candidates = [s for s in TW_CORE if s in TW_STOCKS_DB]
     us_candidates = list(US_STOCKS_SCREEN)
 
     tw_results = []
@@ -1384,17 +1409,17 @@ def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
 
     def fetch_tw(stock_id):
         try:
-            price_data = fetch_twse_price(stock_id)
-            if not price_data or not price_data.get("price"):
-                price_data = fetch_tw_price_yfinance(stock_id)
-            if not price_data or not price_data.get("price"):
+            # 用 FinMind history 取歷史（無 TWSE semaphore 瓶頸）
+            hist = fetch_tw_history(stock_id)
+            if not hist or len(hist.get("closes", [])) < 20:
                 return None
-            ind = get_full_indicators(stock_id)
+            closes = hist["closes"]
+            price  = closes[-1]
+            prev   = closes[-2] if len(closes) >= 2 else price
+            chg_pct = round((price - prev) / prev * 100, 2) if prev else 0
+            ind = get_full_indicators(stock_id)  # 內部會命中 fetch_tw_history 快取
             if not ind:
                 return None
-            hist = fetch_tw_history(stock_id)
-            closes = hist["closes"] if hist else []
-            price = price_data["price"]
             atr = ind.get("ATR14", 0)
             if atr and atr > 0:
                 target    = round(price + atr * 2, 1)
@@ -1403,20 +1428,20 @@ def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
                 target    = round(price * (1 + tw_tp), 0)
                 stop_loss = round(price * (1 - tw_sl), 0)
             return {
-                "id": stock_id,
-                "name": price_data.get("name", TW_STOCKS_DB.get(stock_id, stock_id)),
-                "market": "TW",
-                "price": price,
-                "change_pct": price_data.get("change_pct", 0),
-                "target": target,
-                "stop_loss": stop_loss,
-                "score": ind.get("score"),
-                "winrate": ind.get("winrate"),
-                "action": ind.get("action", "觀察"),
-                "signals": ind.get("signals", []),
-                "rsi": ind.get("RSI14", 50),
+                "id":         stock_id,
+                "name":       TW_STOCKS_DB.get(stock_id, stock_id),
+                "market":     "TW",
+                "price":      price,
+                "change_pct": chg_pct,
+                "target":     target,
+                "stop_loss":  stop_loss,
+                "score":      ind.get("score"),
+                "winrate":    ind.get("winrate"),
+                "action":     ind.get("action", "觀察"),
+                "signals":    ind.get("signals", []),
+                "rsi":        ind.get("RSI14", 50),
                 "macd_cross": ind.get("MACD", {}).get("cross", ""),
-                "sparkline": closes[-20:] if len(closes) >= 20 else closes
+                "sparkline":  closes[-20:]
             }
         except Exception as e:
             print(f"Recommend TW error {stock_id}: {e}")
@@ -1473,35 +1498,39 @@ def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
             print(f"Recommend US error {sym}: {e}")
             return None
 
-    # 台股並行掃描（加大 worker 數量）
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    # 台股並行掃描（FinMind history 為主，無 semaphore 瓶頸，可加大 worker）
+    with ThreadPoolExecutor(max_workers=20) as ex:
         tw_futures = {ex.submit(fetch_tw, s): s for s in tw_candidates}
-        for future in as_completed(tw_futures, timeout=90):
+        for future in as_completed(tw_futures, timeout=150):
             try:
-                r = future.result(timeout=30)
+                r = future.result(timeout=25)
                 if r:
                     tw_results.append(r)
+                    # 每累積 5 筆就先存快取，讓前端更早拿到資料
+                    if len(tw_results) % 5 == 0:
+                        tw_part = sorted(tw_results, key=lambda x: x.get("score",0) or 0, reverse=True)
+                        cache_set("recommend", {"tw": tw_part[:10], "us": us_results[:10]}, 3600)
             except Exception as e:
                 print(f"Recommend TW future error: {e}")
 
     # 美股並行掃描
     with ThreadPoolExecutor(max_workers=12) as ex:
         us_futures = {ex.submit(fetch_us, s): s for s in us_candidates}
-        for future in as_completed(us_futures, timeout=60):
+        for future in as_completed(us_futures, timeout=90):
             try:
-                r = future.result(timeout=30)
+                r = future.result(timeout=25)
                 if r:
                     us_results.append(r)
             except Exception as e:
                 print(f"Recommend US future error: {e}")
 
-    # 各自依評分排序，各取前10
+    # 最終結果依評分排序，各取前10
     tw_results.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
     us_results.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
     payload = {"tw": tw_results[:10], "us": us_results[:10]}
 
     cache_set("recommend", payload, 3600)  # 快取 1 小時
-    print(f"[Recommend] 更新完畢 — 台股 {len(tw_results)} 檔取前10 / 美股 {len(us_results)} 檔取前10")
+    print(f"[Recommend] 更新完畢 — 台股掃 {len(tw_candidates)} 檔得 {len(tw_results)} 筆取前10 / 美股 {len(us_results)} 筆取前10")
     return payload
 
 def _bg_warm_recommend():
