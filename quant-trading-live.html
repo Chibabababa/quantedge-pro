@@ -2067,6 +2067,11 @@ async function loadTechStock(){
   $('techIndList').innerHTML='<div class="loading"><div class="spinner"></div>計算指標中...</div>';
   $('techChartTitle').textContent=`📊 ${id} K線走勢圖`;
   $('techAdvice').textContent='載入中...';
+  // 清除上一支股票的殘留值
+  $('techScore').textContent='—';
+  $('techWinrate').textContent='—';
+  $('techATR').textContent='—';
+  $('techAction').innerHTML='<span class="tag tg">—</span>';
   // 清除舊圖，避免顯示上一支股票的 K 線
   const kc=$('klineChart'); if(kc){const ctx=kc.getContext('2d');ctx.clearRect(0,0,kc.width,kc.height);}
   $('klineLabels').innerHTML='';
@@ -2116,7 +2121,9 @@ async function loadTechStock(){
     const wr=ind.winrate!=null?ind.winrate:null;
     const action=ind.action||'觀察';
     $('techScore').textContent=score!=null?score:'—';
-    $('techWinrate').textContent=wr!=null?wr+'%':'—';
+    // 勝率：有真實回測資料時標示「實測」，否則標示「估算」
+    const wrLabel=ind.backtest_real?'實測':'估算';
+    $('techWinrate').innerHTML=wr!=null?`${wr}% <span style="font-size:9px;color:var(--text3)">(${wrLabel})</span>`:'—';
     $('techATR').textContent=fmt(atr);
     $('techAction').innerHTML=signal2tag(action);
     // Item9: ATR 動態目標價（取代固定百分比）

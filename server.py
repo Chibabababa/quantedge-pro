@@ -804,6 +804,8 @@ def get_full_indicators(stock_id, is_tw=True):
     winrate, action, signals = winrate_signal(
         rsi, macd["cross"], kd["K"], kd["D"], price, ma5, ma20,
         closes=closes, highs=highs, lows=lows, strategy=best_strategy)
+    # 判斷是否為真實回測（歷史資料 ≥ 30 筆才跑回測）
+    backtest_real = closes is not None and len(closes) >= 30
     # 綜合評分
     score_items = [
         price > ma5, price > ma20, ma5 > ma20,
@@ -824,6 +826,7 @@ def get_full_indicators(stock_id, is_tw=True):
         "avg_volume": avg_vol,
         "score": score,
         "winrate": winrate,
+        "backtest_real": backtest_real,
         "action": action,
         "signals": signals
     }
