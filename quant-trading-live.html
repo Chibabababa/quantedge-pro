@@ -335,13 +335,25 @@ select option{background:var(--bg2)}
 
   <div class="g2 gap mb20">
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-        <div class="ctitle" style="margin-bottom:0" id="twiiChartTitle">📈 台灣加權指數 走勢圖</div>
-        <div style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700" id="twiiChartPrice">—</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <span style="font-size:11px;color:var(--text3)">TWII・近3個月</span>
-        <span id="twiiChartChg" style="font-size:11px">—</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <div>
+          <div class="ctitle" style="margin-bottom:0" id="twiiChartTitle">📈 台灣加權指數 走勢圖</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:3px">
+            <span style="font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700" id="twiiChartPrice">—</span>
+            <span id="twiiChartChg" style="font-size:11px">—</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end">
+          <div style="display:flex;gap:2px;background:rgba(0,0,0,.3);border-radius:6px;padding:2px;flex-wrap:wrap">
+            <button id="idxBtn-twii"   class="tf-btn tf-on" onclick="switchIndexChart('twii')">加權</button>
+            <button id="idxBtn-night"  class="tf-btn"       onclick="switchIndexChart('night')">夜盤</button>
+            <button id="idxBtn-two"    class="tf-btn"       onclick="switchIndexChart('two')">上櫃</button>
+            <button id="idxBtn-txf"    class="tf-btn"       onclick="switchIndexChart('txf')">台指期</button>
+            <button id="idxBtn-sp500"  class="tf-btn"       onclick="switchIndexChart('sp500')">S&P500</button>
+            <button id="idxBtn-nasdaq" class="tf-btn"       onclick="switchIndexChart('nasdaq')">Nasdaq</button>
+            <button id="idxBtn-sox"    class="tf-btn"       onclick="switchIndexChart('sox')">費半</button>
+          </div>
+        </div>
       </div>
       <canvas id="mainChart" height="180" style="width:100%"></canvas>
       <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace" id="mainChartLabels"></div>
@@ -1636,21 +1648,47 @@ async function loadIndex(){
   }catch(e){ console.log('Index load error:',e); }
 }
 
-// ── 主圖：台灣加權指數走勢 ──────────────────────────
-async function loadMainChart(){
+// ── 主圖：大盤走勢圖 ──────────────────────────────
+const _IDX_META={
+  twii:   {label:'台灣加權指數', emoji:'📈', unit:''},
+  night:  {label:'台股夜盤期貨', emoji:'🌙', unit:''},
+  two:    {label:'台股上櫃指數', emoji:'📊', unit:''},
+  txf:    {label:'台指期（近月）',emoji:'📉', unit:''},
+  sp500:  {label:'S&P 500',      emoji:'🇺🇸', unit:''},
+  nasdaq: {label:'Nasdaq 綜合',  emoji:'💻', unit:''},
+  sox:    {label:'費城半導體',   emoji:'🔬', unit:''},
+};
+let _curIndexKey='twii';
+
+async function switchIndexChart(key){
+  _curIndexKey=key;
+  // 切換按鈕樣式
+  Object.keys(_IDX_META).forEach(k=>{
+    const btn=$('idxBtn-'+k);
+    if(btn) btn.classList.toggle('tf-on', k===key);
+  });
+  await loadMainChart(key);
+}
+
+async function loadMainChart(key){
+  key=key||_curIndexKey||'twii';
+  const meta=_IDX_META[key]||_IDX_META.twii;
+  const titleEl=$('twiiChartTitle');
+  const priceEl=$('twiiChartPrice');
+  const chgEl=$('twiiChartChg');
+  if(titleEl) titleEl.textContent=`${meta.emoji} ${meta.label} 走勢圖`;
+  if(priceEl){ priceEl.textContent='載入中…'; priceEl.className=''; }
+  if(chgEl){ chgEl.textContent=''; }
   try{
-    // 抓加權指數歷史（用 ^TWII）
-    const r=await fetch(`${API}/history/%5ETWII?market=us`);
-    if(!r.ok) throw new Error('twii fail');
+    const r=await fetch(`${API}/index_hist/${key}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
     const hist=await r.json();
     if(hist&&hist.closes&&hist.closes.length>2){
       drawLineChart('mainChart','mainChartLabels',hist.closes,hist.dates);
-      // 填入目前價格與漲跌
       const closes=hist.closes;
       const last=closes[closes.length-1];
       const prev=closes[closes.length-2];
       const chg=last-prev, chgPct=prev?((chg/prev)*100):0;
-      const priceEl=$('twiiChartPrice'), chgEl=$('twiiChartChg');
       if(priceEl){ priceEl.textContent=last.toLocaleString(); priceEl.className=chg>=0?'up':'dn'; }
       if(chgEl){
         chgEl.textContent=(chg>=0?'+':'')+chgPct.toFixed(2)+'%';
@@ -1658,17 +1696,22 @@ async function loadMainChart(){
       }
       return;
     }
-  }catch(e){ console.log('TWII chart error:',e); }
-  // 備援：改用台積電
-  try{
-    const r2=await fetch(`${API}/history/2330?market=tw`); if(!r2.ok) return;
-    const hist2=await r2.json();
-    if(hist2&&hist2.closes){
-      drawLineChart('mainChart','mainChartLabels',hist2.closes,hist2.dates);
-      const t=$('twiiChartTitle');
-      if(t) t.textContent='📈 台積電 (2330) 走勢圖';
+  }catch(e){
+    console.log(`[MainChart] ${key} 失敗:`,e);
+    if(priceEl){ priceEl.textContent='—'; priceEl.className=''; }
+    if(chgEl){ chgEl.textContent='無法取得資料'; chgEl.className='neutral'; }
+    // 加權指數失敗時備援台積電
+    if(key==='twii'){
+      try{
+        const r2=await fetch(`${API}/history/2330?market=tw`); if(!r2.ok) return;
+        const hist2=await r2.json();
+        if(hist2&&hist2.closes){
+          drawLineChart('mainChart','mainChartLabels',hist2.closes,hist2.dates);
+          if(titleEl) titleEl.textContent='📈 台積電 (2330) 走勢圖';
+        }
+      }catch(e2){ console.log('fallback chart error:',e2); }
     }
-  }catch(e2){ console.log('fallback chart error:',e2); }
+  }
 }
 
 function drawLineChart(canvasId,labelsId,closes,dates){
@@ -2999,7 +3042,7 @@ window.addEventListener('load',async()=>{
   window.addEventListener('resize',()=>{
     const active=document.querySelector('.page.active');
     if(!active) return;
-    if(active.id==='page-dashboard') loadMainChart();
+    if(active.id==='page-dashboard') loadMainChart(_curIndexKey);
     if(active.id==='page-technical') loadTechStock();
   });
 });

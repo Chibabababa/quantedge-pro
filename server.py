@@ -1213,6 +1213,110 @@ def api_history(stock_id):
         return jsonify({"error": "無法取得歷史數據"}), 404
     return jsonify(hist)
 
+@app.route("/api/index_hist/<key>")
+def api_index_hist(key):
+    """大盤走勢圖專用：台指期、台股夜盤用 FinMind；其餘指數用 yfinance"""
+    SYMBOL_MAP = {
+        "twii":   ("yf",  "^TWII"),
+        "two":    ("yf",  "^TWO"),
+        "sp500":  ("yf",  "^GSPC"),
+        "nasdaq": ("yf",  "^IXIC"),
+        "sox":    ("yf",  "^SOX"),
+        "txf":    ("fm",  "TX"),     # 台指期近月（FinMind）
+        "night":  ("fmn", "TX"),     # 台股夜盤（FinMind夜盤期貨）
+    }
+    cfg = SYMBOL_MAP.get(key.lower())
+    if not cfg:
+        return jsonify({"error": "未知指數"}), 404
+
+    cache_key = f"idx_hist_{key}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
+    src, sym = cfg
+
+    # ── yfinance 指數 ──────────────────────────────
+    if src == "yf":
+        try:
+            with _yf_semaphore:
+                df = yf.Ticker(sym).history(period="3mo", auto_adjust=True)
+            if df.empty:
+                return jsonify({"error": "無資料"}), 404
+            df = df.reset_index()
+            result = {
+                "dates":  [str(d.date()) if hasattr(d,"date") else str(d)[:10] for d in df["Date"]],
+                "closes": [round(float(v), 2) for v in df["Close"]],
+            }
+            cache_set(cache_key, result, 300)
+            return jsonify(result)
+        except Exception as e:
+            print(f"[index_hist yf] {sym}: {e}")
+            return jsonify({"error": "取得失敗"}), 500
+
+    # ── FinMind 台指期（日盤）─────────────────────
+    if src == "fm":
+        try:
+            start = (datetime.now() - timedelta(days=100)).strftime("%Y-%m-%d")
+            rows = finmind_fetch("TaiwanFuturesDaily", sym, start_date=start)
+            # 只取近月合約（settlement_month 最近的）
+            if not rows:
+                return jsonify({"error": "FinMind 無資料"}), 404
+            # 依日期+合約月份排序，取每日最近月合約收盤價
+            from collections import defaultdict
+            by_date = defaultdict(list)
+            for r in rows:
+                by_date[r["date"]].append(r)
+            dates, closes = [], []
+            for d in sorted(by_date.keys()):
+                # 取 settlement_month 最小（近月）
+                day_rows = sorted(by_date[d], key=lambda x: x.get("settlement_month",""))
+                c = float(day_rows[0].get("close", 0))
+                if c > 0:
+                    dates.append(d)
+                    closes.append(round(c, 0))
+            if not closes:
+                return jsonify({"error": "無收盤價"}), 404
+            result = {"dates": dates, "closes": closes}
+            cache_set(cache_key, result, 300)
+            return jsonify(result)
+        except Exception as e:
+            print(f"[index_hist fm] {sym}: {e}")
+            return jsonify({"error": "取得失敗"}), 500
+
+    # ── FinMind 台股夜盤期貨 ───────────────────────
+    if src == "fmn":
+        try:
+            start = (datetime.now() - timedelta(days=100)).strftime("%Y-%m-%d")
+            rows = finmind_fetch("TaiwanFuturesNight", sym, start_date=start)
+            if not rows:
+                # 夜盤資料不足時，備援用台指期日盤
+                rows = finmind_fetch("TaiwanFuturesDaily", sym, start_date=start)
+            if not rows:
+                return jsonify({"error": "FinMind 夜盤無資料"}), 404
+            from collections import defaultdict
+            by_date = defaultdict(list)
+            for r in rows:
+                by_date[r["date"]].append(r)
+            dates, closes = [], []
+            for d in sorted(by_date.keys()):
+                day_rows = sorted(by_date[d], key=lambda x: x.get("settlement_month",""))
+                c = float(day_rows[0].get("close", 0))
+                if c > 0:
+                    dates.append(d)
+                    closes.append(round(c, 0))
+            if not closes:
+                return jsonify({"error": "無收盤價"}), 404
+            result = {"dates": dates, "closes": closes}
+            cache_set(cache_key, result, 300)
+            return jsonify(result)
+        except Exception as e:
+            print(f"[index_hist fmn] {sym}: {e}")
+            return jsonify({"error": "取得失敗"}), 500
+
+    return jsonify({"error": "未知來源"}), 500
+
+
 @app.route("/api/monitor", methods=["POST"])
 def api_monitor():
     """批次查詢監控清單（並行抓取，30秒快取，三層備援）"""
