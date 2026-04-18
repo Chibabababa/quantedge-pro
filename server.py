@@ -1125,7 +1125,13 @@ def api_stock(stock_id):
         if not price_data:
             price_data = fetch_tpex_price(stock_id)
         if not price_data:
-            return jsonify({"error": "無法取得台股數據"}), 404
+            # 最後嘗試 yfinance
+            try:
+                price_data = fetch_tw_price_yfinance(stock_id)
+            except Exception:
+                price_data = None
+        if not price_data:
+            return jsonify({"error": f"找不到股票代號 {stock_id}，請確認代號是否正確（台股4位數字，如 2330）"}), 404
         hist = fetch_tw_history(stock_id)
         # 若週期是預設值則用快取版指標，否則重新計算
         if (rsi_period == 14 and macd_fast == 12 and macd_slow == 26

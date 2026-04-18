@@ -2067,10 +2067,17 @@ async function loadTechStock(){
   $('techIndList').innerHTML='<div class="loading"><div class="spinner"></div>計算指標中...</div>';
   $('techChartTitle').textContent=`📊 ${id} K線走勢圖`;
   $('techAdvice').textContent='載入中...';
+  // 清除舊圖，避免顯示上一支股票的 K 線
+  const kc=$('klineChart'); if(kc){const ctx=kc.getContext('2d');ctx.clearRect(0,0,kc.width,kc.height);}
+  $('klineLabels').innerHTML='';
   try{
     const qs=`market=${market}&rsi_period=${pRsi}&macd_fast=${pFast}&macd_slow=${pSlow}&macd_signal=${pSig}&bb_period=${pBb}`;
-    const r=await fetch(`${API}/stock/${id}?${qs}`);
-    if(!r.ok) throw new Error('API error');
+    const r=await fetch(`${API}/stock/${id}?${qs}`,{signal:AbortSignal.timeout(60000)});
+    if(r.status===404){
+      const d=await r.json().catch(()=>({}));
+      throw new Error('NOT_FOUND:'+(d.error||`找不到股票代號 ${id}`));
+    }
+    if(!r.ok) throw new Error('HTTP '+r.status);
     const data=await r.json();
     const ind=data.indicators||{};
     const hist=data.history||{};
@@ -2131,8 +2138,15 @@ async function loadTechStock(){
     // News
     loadNewsForTech(id,market);
   }catch(e){
-    $('techIndList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px">⚠ 無法取得數據<br>請確認伺服器連線</div>';
-    $('techAdvice').textContent='無法連接伺服器，請確認 server.py 已啟動。';
+    const isNotFound=e.message&&e.message.startsWith('NOT_FOUND:');
+    const isTimeout=(e.name==='TimeoutError'||e.name==='AbortError');
+    const errMsg=isNotFound
+      ? e.message.replace('NOT_FOUND:','')
+      : isTimeout
+        ? '查詢逾時，伺服器仍在計算中，請稍後重試'
+        : `連線異常（${e.message}），請稍後重試`;
+    $('techIndList').innerHTML=`<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px">⚠ ${errMsg}</div>`;
+    $('techAdvice').textContent=isNotFound?`股票代號 ${id} 查無資料，請確認代號是否正確`:'伺服器暫時無法回應，請稍後再試。';
   }
 }
 
