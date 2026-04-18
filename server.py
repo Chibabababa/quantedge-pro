@@ -1449,79 +1449,130 @@ def api_recommend():
     resp.headers["X-Warming"] = "1"
     return resp
 
-@app.route("/api/news/<stock_id>")
-def api_news(stock_id):
-    """爬取相關新聞（Yahoo 財經台灣）"""
-    cached = cache_get(f"news_{stock_id}")
-    if cached:
-        return jsonify(cached)
-    news_list = []
+def _news_sentiment(title: str) -> str:
+    """關鍵字情感分析，回傳 'positive'/'negative'/'neutral'"""
+    tl = title.lower()
+    pos_words = [
+        "上漲","漲停","突破","創新高","反彈","強勢","多頭","拉升","跳空","大漲",
+        "收復","過關","站上","買超","利多","營收成長","獲利","超越預期","擴產",
+        "拿下大單","合作","配息","除息","填息","股息","回購","庫藏股","創高",
+        "beat","exceeded","upgrade","outperform","surge","rise","gain",
+        "record","bullish","growth","profit","revenue up","raised guidance",
+        "降息","Fed寬鬆","資金寬裕","PMI擴張",
+    ]
+    neg_words = [
+        "下跌","跌停","破底","創新低","空頭","崩跌","大跌","摜壓","下破",
+        "賣壓","跌破","虧損","賣超","利空","下修","衰退","裁員","獲利衰退",
+        "毛利下滑","客戶砍單","停工","罰款","訴訟","倒閉","債務違約",
+        "miss","below","downgrade","underperform","fall","drop","loss",
+        "decline","warn","cut guidance","layoff","shutdown","recall","investigation",
+        "升息","通膨","Fed緊縮","PMI萎縮",
+    ]
+    if any(w in title or w in tl for w in pos_words): return "positive"
+    if any(w in title or w in tl for w in neg_words): return "negative"
+    return "neutral"
+
+
+def _fetch_cnyes_news(stock_id: str, limit: int = 10) -> list:
+    """鉅亨網個股新聞（繁體中文），以股票代號為關鍵字搜尋"""
+    import requests as req
+    headers = {
+        "Origin":  "https://news.cnyes.com/",
+        "Referer": "https://news.cnyes.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+    }
+    url = (
+        f"https://api.cnyes.com/media/api/v1/newslist/category/tw_stock_news"
+        f"?keyword={stock_id}&limit={limit}&page=1"
+    )
+    r = req.get(url, headers=headers, timeout=12)
+    if r.status_code != 200:
+        return []
+    data = r.json().get("items", {}).get("data", [])
+    results = []
+    for n in data:
+        news_id = n.get("newsId", "")
+        title   = n.get("title", "")
+        summary = n.get("summary", "")
+        pub_ts  = n.get("publishAt", 0)
+        cat     = n.get("categoryName", "鉅亨網")
+        link    = f"https://news.cnyes.com/news/id/{news_id}" if news_id else "#"
+        pub_time = (datetime.fromtimestamp(pub_ts).strftime("%m/%d %H:%M")
+                    if pub_ts else "")
+        if not title:
+            continue
+        results.append({
+            "title":     title,
+            "link":      link,
+            "publisher": f"鉅亨網・{cat}",
+            "time":      pub_time,
+            "summary":   summary,
+            "sentiment": _news_sentiment(title),
+        })
+    return results
+
+
+def _fetch_yfinance_news(stock_id: str, limit: int = 10) -> list:
+    """yfinance 新聞（適合美股/ETF），相容新舊格式"""
+    results = []
     try:
-        ticker = yf.Ticker(f"{stock_id}.TW" if len(stock_id) == 4 and stock_id.isdigit() else stock_id)
-        news = ticker.news or []
-        for n in news[:10]:
-            # 相容新舊兩種 yfinance 新聞格式
-            content = n.get("content") or {}
-            title = n.get("title") or content.get("title", "")
-            link = (n.get("link")
-                    or (content.get("canonicalUrl") or {}).get("url", "")
-                    or "#")
-            pub = n.get("providerPublishTime", 0)
+        sym = f"{stock_id}.TW" if (len(stock_id) == 4 and stock_id.isdigit()) else stock_id
+        news = yf.Ticker(sym).news or []
+        for n in news[:limit]:
+            content  = n.get("content") or {}
+            title    = n.get("title") or content.get("title", "")
+            link     = (n.get("link")
+                        or (content.get("canonicalUrl") or {}).get("url", "")
+                        or "#")
+            pub      = n.get("providerPublishTime", 0)
             if not pub:
                 pub_str = content.get("pubDate", "")
                 if pub_str:
                     try:
-                        pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
-                        pub = pub_dt.timestamp()
+                        pub = datetime.fromisoformat(
+                            pub_str.replace("Z", "+00:00")).timestamp()
                     except Exception:
                         pub = 0
             publisher = (n.get("publisher")
                          or (content.get("provider") or {}).get("displayName", "")
                          or "")
             pub_time = datetime.fromtimestamp(pub).strftime("%m/%d %H:%M") if pub else ""
-            # 情感分析（擴充至 60+ 關鍵字，覆蓋繁體中文、英文、財報術語）
-            title_lower = title.lower()
-            pos_words = [
-                # 價格 / 走勢
-                "上漲", "漲停", "突破", "創新高", "反彈", "強勢", "多頭",
-                "拉升", "跳空", "大漲", "收復", "過關", "站上",
-                # 基本面
-                "買超", "利多", "營收成長", "獲利", "超越預期", "EPS增加",
-                "毛利提升", "訂單大增", "擴產", "拿下大單", "合作",
-                "配息", "除息", "填息", "股息", "回購", "庫藏股",
-                # 英文財報
-                "beat", "exceeded", "upgrade", "outperform", "surge",
-                "rise", "gain", "record", "bullish", "growth",
-                "profit", "revenue up", "raised guidance",
-                # 總經利多
-                "降息", "Fed寬鬆", "資金寬裕", "PMI擴張",
-            ]
-            neg_words = [
-                # 價格 / 走勢
-                "下跌", "跌停", "破底", "創新低", "空頭", "崩跌",
-                "大跌", "摜壓", "下破", "賣壓", "跌破",
-                # 基本面
-                "虧損", "賣超", "利空", "下修", "衰退", "裁員",
-                "EPS不如預期", "獲利衰退", "毛利下滑", "客戶砍單",
-                "停工", "罰款", "訴訟", "倒閉", "債務違約",
-                # 英文財報
-                "miss", "below", "downgrade", "underperform", "fall",
-                "drop", "loss", "decline", "warn", "cut guidance",
-                "layoff", "shutdown", "recall", "investigation",
-                # 總經利空
-                "升息", "通膨", "Fed緊縮", "PMI萎縮", "衰退",
-            ]
-            sentiment = "positive" if any(w in title or w in title_lower for w in pos_words) else \
-                        "negative" if any(w in title or w in title_lower for w in neg_words) else "neutral"
-            news_list.append({
-                "title": title,
-                "link": link,
+            if not title:
+                continue
+            results.append({
+                "title":     title,
+                "link":      link,
                 "publisher": publisher,
-                "time": pub_time,
-                "sentiment": sentiment
+                "time":      pub_time,
+                "summary":   "",
+                "sentiment": _news_sentiment(title),
             })
     except Exception as e:
-        print(f"News fetch error {stock_id}: {e}")
+        print(f"[yfinance news] {stock_id}: {e}")
+    return results
+
+
+@app.route("/api/news/<stock_id>")
+def api_news(stock_id):
+    """相關新聞：台股用鉅亨網（繁中），美股/ETF 用 yfinance"""
+    cached = cache_get(f"news_{stock_id}")
+    if cached is not None:
+        return jsonify(cached)
+
+    is_tw = len(stock_id) <= 6 and stock_id[:4].isdigit()
+
+    if is_tw:
+        news_list = _fetch_cnyes_news(stock_id, limit=10)
+        # 若鉅亨回傳空，備援 yfinance
+        if not news_list:
+            news_list = _fetch_yfinance_news(stock_id, limit=10)
+    else:
+        news_list = _fetch_yfinance_news(stock_id, limit=10)
+
     cache_set(f"news_{stock_id}", news_list, 600)
     return jsonify(news_list)
 
