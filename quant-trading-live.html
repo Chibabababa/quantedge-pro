@@ -148,6 +148,12 @@ select option{background:var(--bg2)}
 .tf-btn{background:none;border:none;color:var(--text3);font-size:11px;padding:3px 9px;cursor:pointer;border-radius:4px;transition:.15s}
 .tf-btn:hover{color:var(--text2)}
 .tf-btn.tf-on{background:rgba(0,200,150,.18);color:var(--accent);font-weight:600}
+.ac-list{position:absolute;top:calc(100% + 4px);left:0;min-width:220px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:9999;max-height:240px;overflow-y:auto}
+.ac-item{padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:12px;transition:background .12s}
+.ac-item:hover,.ac-item.ac-active{background:rgba(0,200,150,.12)}
+.ac-item .ac-code{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent2);font-weight:600;min-width:52px}
+.ac-item .ac-name{color:var(--text2)}
+.ac-item .ac-mkt{font-size:9px;padding:1px 5px;border-radius:3px;margin-left:auto}
 .nitem{padding:10px 0;border-bottom:1px solid var(--border2);display:flex;gap:10px}
 .nitem:last-child{border-bottom:none}
 .ntitle a{font-size:12px;color:var(--text);text-decoration:none;line-height:1.5}
@@ -776,7 +782,13 @@ select option{background:var(--bg2)}
       <div style="font-size:11px;color:var(--text3);margin-top:2px">真實即時報價 · 技術訊號</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <input type="text" id="addStockInput" placeholder="股票代號 (如:2888)" style="width:150px">
+      <div style="position:relative">
+        <input type="text" id="addStockInput" placeholder="代號或名稱 (如:台積/2330)" style="width:180px" autocomplete="off"
+          oninput="stockAC('addStockInput','addMarketSel','addAcList')"
+          onkeydown="stockACKey(event,'addAcList')"
+          onblur="setTimeout(()=>hideAC('addAcList'),180)">
+        <div id="addAcList" class="ac-list" style="display:none"></div>
+      </div>
       <select id="addMarketSel"><option value="tw">台股</option><option value="us">美股</option></select>
       <button class="btn btnp btn-sm" onclick="addToMonitor()">＋ 加入</button>
     </div>
@@ -2717,6 +2729,98 @@ async function loadNewsForRec(stockId,market){
 }
 
 function addWatchFromRec(id,market){ if(!monitorStocks.find(s=>s.id===id)){ monitorStocks.push({id,market}); saveMonitor(); } alert(`已加入監控：${id}`); }
+
+// ── 股票自動完成（台股+美股） ──────────────────────
+const TW_AC_DATA = Object.entries({
+  "2330":"台積電","2317":"鴻海","2454":"聯發科","2303":"聯電","2308":"台達電",
+  "3034":"聯詠","2379":"瑞昱","3711":"日月光投控","6770":"力積電","2449":"京元電子",
+  "3443":"創意","6515":"穎崴","2337":"旺宏","3533":"嘉澤","2317":"鴻海",
+  "2382":"廣達","2357":"華碩","2353":"宏碁","3008":"大立光","2395":"研華",
+  "4938":"和碩","2324":"仁寶","2356":"英業達","3231":"緯創","2377":"微星",
+  "2376":"技嘉","3017":"奇鋐","6669":"緯穎","6488":"環球晶","3035":"智原",
+  "2409":"友達","3481":"群創","2345":"智邦","4904":"遠傳","3045":"台灣大",
+  "2881":"富邦金","2882":"國泰金","2891":"中信金","2886":"兆豐金","2884":"玉山金",
+  "2887":"台新金","2885":"元大金","2892":"第一金","5880":"合庫金","2880":"華南金",
+  "2883":"開發金","2890":"永豐金","2412":"中華電",
+  "1301":"台塑","1303":"南亞","1326":"台化","6505":"台塑化",
+  "2002":"中鋼","1101":"台泥","1102":"亞泥","1216":"統一",
+  "2615":"萬海","2603":"長榮","2609":"陽明","2610":"華航","2618":"長榮航",
+  "2207":"和泰車","2912":"統一超","9910":"豐泰","9914":"美利達","9921":"巨大",
+  "0050":"元大台灣50","0056":"元大高股息","00878":"國泰永續高股息",
+  "2327":"國巨","2408":"南亞科","2344":"華邦電","3037":"欣興","2049":"上銀","1590":"亞德客",
+  "6533":"富采控股","5274":"信驊","6279":"胡連","6261":"久元","6757":"台光電",
+  "3596":"智易","6271":"同欣電","6449":"網家","2301":"光寶科","2385":"群光",
+}).map(([id,name])=>({id,name,market:'tw'}));
+
+const US_AC_DATA = [
+  {id:'AAPL',name:'Apple'},       {id:'MSFT',name:'Microsoft'},
+  {id:'GOOGL',name:'Google'},     {id:'AMZN',name:'Amazon'},
+  {id:'META',name:'Meta'},        {id:'NVDA',name:'NVIDIA'},
+  {id:'AMD',name:'AMD'},          {id:'INTC',name:'Intel'},
+  {id:'QCOM',name:'Qualcomm'},    {id:'AVGO',name:'Broadcom'},
+  {id:'TSM',name:'TSMC ADR'},     {id:'ASML',name:'ASML'},
+  {id:'MU',name:'Micron'},        {id:'AMAT',name:'Applied Materials'},
+  {id:'TSLA',name:'Tesla'},       {id:'NFLX',name:'Netflix'},
+  {id:'CRM',name:'Salesforce'},   {id:'NOW',name:'ServiceNow'},
+  {id:'SNOW',name:'Snowflake'},   {id:'PLTR',name:'Palantir'},
+  {id:'JPM',name:'JPMorgan'},     {id:'BAC',name:'Bank of America'},
+  {id:'GS',name:'Goldman Sachs'}, {id:'V',name:'Visa'},
+  {id:'MA',name:'Mastercard'},    {id:'JNJ',name:'J&J'},
+  {id:'UNH',name:'UnitedHealth'}, {id:'WMT',name:'Walmart'},
+  {id:'COST',name:'Costco'},      {id:'NKE',name:'Nike'},
+].map(o=>({...o,market:'us'}));
+
+const ALL_AC_DATA = [...TW_AC_DATA, ...US_AC_DATA];
+
+let _acIdx = -1;
+
+function stockAC(inputId, marketSelId, listId){
+  const inp = $(inputId), list = $(listId);
+  if(!inp||!list) return;
+  const q = inp.value.trim();
+  if(!q){ list.style.display='none'; return; }
+  const ql = q.toLowerCase();
+  const market = marketSelId ? $(marketSelId)?.value : null;
+  // 依市場過濾，再依代號或名稱前綴比對
+  const pool = ALL_AC_DATA.filter(s => !market || market === 'both' || s.market === market);
+  const hits = pool.filter(s =>
+    s.id.toLowerCase().startsWith(ql) ||
+    s.name.toLowerCase().startsWith(ql) ||
+    s.name.includes(q)
+  ).slice(0, 10);
+  if(!hits.length){ list.style.display='none'; return; }
+  _acIdx = -1;
+  list.innerHTML = hits.map((s,i)=>`
+    <div class="ac-item" data-id="${s.id}" data-market="${s.market}"
+      onmousedown="acPick('${inputId}','${marketSelId}','${listId}','${s.id}','${s.market}')">
+      <span class="ac-code">${s.id}</span>
+      <span class="ac-name">${s.name}</span>
+      <span class="ac-mkt ${s.market==='us'?'tb':'tg'}">${s.market==='us'?'🇺🇸':'🇹🇼'}</span>
+    </div>`).join('');
+  list.style.display = 'block';
+}
+
+function acPick(inputId, marketSelId, listId, id, market){
+  const inp=$(inputId), sel=$(marketSelId), list=$(listId);
+  if(inp) inp.value = id;
+  if(sel) sel.value = market;
+  if(list) list.style.display = 'none';
+  _acIdx = -1;
+}
+
+function stockACKey(e, listId){
+  const list=$(listId); if(!list||list.style.display==='none') return;
+  const items=[...list.querySelectorAll('.ac-item')];
+  if(!items.length) return;
+  if(e.key==='ArrowDown'){ e.preventDefault(); _acIdx=Math.min(_acIdx+1,items.length-1); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); _acIdx=Math.max(_acIdx-1,0); }
+  else if(e.key==='Enter'&&_acIdx>=0){ e.preventDefault(); items[_acIdx].dispatchEvent(new MouseEvent('mousedown')); return; }
+  else if(e.key==='Escape'){ list.style.display='none'; return; }
+  items.forEach((el,i)=>el.classList.toggle('ac-active',i===_acIdx));
+  if(_acIdx>=0) items[_acIdx].scrollIntoView({block:'nearest'});
+}
+
+function hideAC(listId){ const l=$(listId); if(l) l.style.display='none'; }
 function viewTech(id,market){ $('techStockInput').value=id; $('techMarket').value=market; go('technical'); }
 
 // ── 技術指標 ─────────────────────────────────────
