@@ -129,10 +129,31 @@ select option{background:var(--bg2)}
 .mitem{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid var(--border2);transition:background .15s;cursor:pointer}
 .mitem:hover{background:rgba(0,200,150,.03)}
 .mitem:last-child{border-bottom:none}
+.mitem.dragging{opacity:.35;background:rgba(0,200,150,.04)}
+.mitem.drag-over-top{border-top:2px solid var(--accent);border-bottom:none}
+.mitem.drag-over-bot{border-bottom:2px solid var(--accent)}
+.drag-handle{cursor:grab;color:var(--text3);font-size:14px;padding:0 2px;opacity:.4;flex-shrink:0;user-select:none;line-height:1;touch-action:none}
+.drag-handle:hover{opacity:.9;color:var(--accent)}
+.drag-handle:active{cursor:grabbing}
 .scode{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;color:var(--accent2);min-width:55px}
 .sname{font-size:11px;color:var(--text3)}
 .sprice{font-family:'JetBrains Mono',monospace;font-size:13px;text-align:right}
 .schange{font-family:'JetBrains Mono',monospace;font-size:11px;text-align:right}
+/* Folder */
+.folder-wrap{border-bottom:1px solid var(--border2)}
+.folder-wrap:last-child{border-bottom:none}
+.folder-hdr{display:flex;align-items:center;gap:8px;padding:9px 10px;background:rgba(0,200,150,.04);cursor:pointer;user-select:none;transition:background .15s}
+.folder-hdr:hover{background:rgba(0,200,150,.09)}
+.folder-hdr.drag-over{background:rgba(0,200,150,.18);border:1px dashed var(--accent)}
+.folder-name{font-size:12px;color:var(--accent2);font-weight:600;flex:1}
+.folder-count{font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace}
+.folder-bod .mitem{padding-left:26px;border-bottom:1px solid var(--border2)}
+.folder-bod .mitem:last-child{border-bottom:none}
+.folder-empty{font-size:11px;color:var(--text3);padding:10px 26px;font-style:italic}
+/* Move-to-folder popup */
+.mfolder-pop{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:160px;overflow:hidden}
+.mfolder-pop-item{padding:9px 14px;font-size:12px;cursor:pointer;transition:background .12s;display:flex;align-items:center;gap:8px}
+.mfolder-pop-item:hover{background:rgba(0,200,150,.12);color:var(--accent)}
 
 /* INDICATOR */
 .indrow{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border2)}
@@ -796,7 +817,8 @@ select option{background:var(--bg2)}
   <div class="g2 gap">
     <div class="card">
       <div class="ctitle">📋 監控清單 <span class="badge" id="monBadge">—</span>
-        <button class="btn btn-sm" style="margin-left:auto" onclick="refreshMonitor()">↺ 更新</button>
+        <button class="btn btn-sm" style="margin-left:auto;font-size:10px" onclick="addFolder()">📁 新資料夾</button>
+        <button class="btn btn-sm" style="font-size:10px" onclick="refreshMonitor()">↺ 更新</button>
       </div>
       <div id="monitorList"><div class="loading"><div class="spinner"></div>載入中...</div></div>
     </div>
@@ -1237,7 +1259,7 @@ async function loadFundamental(id,market){
 }
 function addToMonitorFromModal(){
   const{id,market}=_mStock;
-  if(!monitorStocks.find(s=>s.id===id)){monitorStocks.push({id,market});saveMonitor();}
+  if(!findMonStock(id)){monitorStocks.push({id,market});saveMonitor();}
   closeStockModal();go('monitor');
 }
 function viewTechFromModal(){
@@ -1338,17 +1360,47 @@ const DEF_STOCKS=[
 ];
 function loadMonitorLS(){try{const s=localStorage.getItem('qe_mon');return s?JSON.parse(s):DEF_STOCKS;}catch(e){return DEF_STOCKS;}}
 function saveMonitor(){try{localStorage.setItem('qe_mon',JSON.stringify(monitorStocks));}catch(e){}}
-function removeFromMonitor(id){monitorStocks=monitorStocks.filter(s=>s.id!==id);saveMonitor();loadMonitor();}
 let monitorStocks=loadMonitorLS();
+
+// ── Monitor 輔助函式 ──────────────────────────────
+// 展平所有股票（含資料夾內的），用於 API 呼叫
+function flattenMonStocks(){
+  const arr=[];
+  monitorStocks.forEach(item=>{
+    if(item&&item.type==='folder')(item.stocks||[]).forEach(s=>arr.push(s));
+    else if(item&&item.id) arr.push(item);
+  });
+  return arr;
+}
+// 全域搜尋某股票（root + 所有資料夾）
+function findMonStock(id){
+  const uid=String(id).toUpperCase();
+  return flattenMonStocks().find(s=>s.id.toUpperCase()===uid);
+}
+// 從任何位置移除並回傳該項目
+function removeMonStockFromWhere(id){
+  const uid=String(id).toUpperCase();
+  const ri=monitorStocks.findIndex(s=>!s.type&&s.id&&s.id.toUpperCase()===uid);
+  if(ri>=0) return monitorStocks.splice(ri,1)[0];
+  for(const item of monitorStocks){
+    if(item.type==='folder'){
+      const fi=(item.stocks||[]).findIndex(s=>s.id.toUpperCase()===uid);
+      if(fi>=0) return item.stocks.splice(fi,1)[0];
+    }
+  }
+  return null;
+}
+function countMonStocks(){ return flattenMonStocks().length; }
+function removeFromMonitor(id){removeMonStockFromWhere(id);saveMonitor();loadMonitor();}
 
 // ── 加入監控（全站通用） ──────────────────────────
 function addToMonitor(id, market, btnEl){
   id=String(id).trim().toUpperCase();
-  if(monitorStocks.find(s=>s.id.toUpperCase()===id)){
+  if(findMonStock(id)){
     if(btnEl){btnEl.textContent='✓ 已在監控';btnEl.classList.add('added');}
     return;
   }
-  monitorStocks.push({id: market==='us'?id:id.toLowerCase().padStart?id:id, market});
+  monitorStocks.push({id, market});
   saveMonitor();
   if(btnEl){btnEl.textContent='✓ 已加入監控';btnEl.classList.add('added');btnEl.disabled=true;}
   // 如果目前在監控頁面，立刻刷新
@@ -1468,7 +1520,7 @@ function renderScreenResults(data){
   grid.innerHTML=data.map(s=>{
     const chgClass=s.change_pct>0?'up':s.change_pct<0?'dn':'';
     const chgStr=s.change_pct>0?`+${s.change_pct.toFixed(2)}%`:`${s.change_pct.toFixed(2)}%`;
-    const alreadyIn=monitorStocks.find(m=>m.id.toUpperCase()===s.id.toUpperCase());
+    const alreadyIn=findMonStock(s.id);
     const inMon=alreadyIn?'added':'';
     const inMonTxt=alreadyIn?'✓ 已在監控':'＋ 加入監控';
     // 指標 badge
@@ -1513,7 +1565,7 @@ function renderScreenResults(data){
 function addAllToMonitor(){
   let added=0;
   _screenResults.forEach(s=>{
-    if(!monitorStocks.find(m=>m.id.toUpperCase()===s.id.toUpperCase())){
+    if(!findMonStock(s.id)){
       monitorStocks.push({id:s.id,market:s.market});
       added++;
       const btn=document.getElementById('addbtn-'+s.id);
@@ -2477,7 +2529,7 @@ async function loadDashboard(){
   try{
     const r=await fetch(`${API}/monitor`,{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({stocks:monitorStocks}),
+      body:JSON.stringify({stocks:flattenMonStocks()}),
       signal:AbortSignal.timeout(30000)
     });
     if(!r.ok) return;
@@ -2486,84 +2538,130 @@ async function loadDashboard(){
   }catch(e){ console.log('Dashboard market error:',e); }
 }
 
+// ── Monitor 靜態名稱字典 ─────────────────────────
+const MON_NAMES={
+  '2330':'台積電','2454':'聯發科','2303':'聯電','2308':'台達電',
+  '3034':'聯詠','2379':'瑞昱','6770':'力積電','3711':'日月光投控','2449':'京元電子',
+  '3443':'創意','6515':'穎崴','3081':'聯亞','2337':'旺宏','3533':'嘉澤','6274':'台燿',
+  '2317':'鴻海','2382':'廣達','2357':'華碩','2353':'宏碁','3008':'大立光',
+  '2395':'研華','4938':'和碩','2324':'仁寶','2356':'英業達','3231':'緯創',
+  '2377':'微星','2376':'技嘉','2385':'群光','2360':'致茂','3017':'奇鋐',
+  '2399':'映泰','3044':'健鼎','2301':'光寶科','3532':'台勝科',
+  '6669':'緯穎','6488':'環球晶','3035':'智原',
+  '2409':'友達','3481':'群創','2448':'晶電','3189':'景碩',
+  '2345':'智邦','3630':'新鉅科',
+  '2881':'富邦金','2882':'國泰金','2891':'中信金','2886':'兆豐金',
+  '2884':'玉山金','2887':'台新金','2885':'元大金','2892':'第一金','5880':'合庫金',
+  '2880':'華南金','2883':'開發金','2890':'永豐金','5876':'上海商銀',
+  '2834':'臺企銀','2801':'彰銀',
+  '2412':'中華電','3045':'台灣大','4904':'遠傳',
+  '1301':'台塑','1303':'南亞','1326':'台化','6505':'台塑化','1402':'遠東新',
+  '2002':'中鋼','2006':'東和鋼鐵','2027':'大成鋼',
+  '1101':'台泥','1102':'亞泥','1216':'統一','1229':'聯華','1210':'大成','1702':'南僑',
+  '2615':'萬海','2603':'長榮','2609':'陽明','2610':'華航','2618':'長榮航',
+  '4119':'旭富','1795':'美時','6547':'高端疫苗',
+  '2207':'和泰車','2912':'統一超','9910':'豐泰','9914':'美利達','9921':'巨大',
+  '0050':'元大台灣50','0056':'元大高股息',
+  '00878':'國泰永續高股息','00881':'國泰台灣5G+',
+  '00900':'富邦特選高股息','00692':'富邦公司治理',
+  '006208':'富邦台50','00850':'元大ESG永續',
+  '2327':'國巨','2408':'南亞科','2344':'華邦電','3037':'欣興',
+  '2049':'上銀','1590':'亞德客','2354':'鴻準',
+  '6533':'富采控股','4958':'臻鼎-KY','5274':'信驊',
+  '6279':'胡連','6261':'久元','6757':'台光電','3596':'智易','6781':'AES-KY','6271':'同欣電',
+  'NVDA':'NVIDIA','AAPL':'Apple','TSLA':'Tesla','MSFT':'Microsoft',
+  'META':'Meta','AMZN':'Amazon','GOOGL':'Google','AMD':'AMD',
+  'INTC':'Intel','QCOM':'高通','AVGO':'博通','TSM':'台積ADR',
+  'ASML':'ASML','NFLX':'Netflix','CRM':'Salesforce',
+  'MU':'美光','AMAT':'應用材料','KLAC':'科磊','NOW':'ServiceNow','SNOW':'Snowflake','PLTR':'Palantir',
+  'JPM':'摩根大通','BAC':'美國銀行','GS':'高盛','V':'Visa','MA':'Mastercard',
+  'JNJ':'嬌生','UNH':'聯合健康','PFE':'輝瑞','ABBV':'艾伯維',
+  'WMT':'沃爾瑪','COST':'好市多','NKE':'耐吉',
+};
+
+// ── 拖曳狀態 ──────────────────────────────────────
+let _monDragSrc=null; // {id, inFolder: folderName or null}
+
+// ── 渲染單一股票列 ────────────────────────────────
+function _renderMItem(s, inFolderName){
+  const fEnc=inFolderName?encodeURIComponent(inFolderName):'';
+  return `<div class="mitem" id="mitem-${s.id}"
+    draggable="true"
+    data-stockid="${s.id}"
+    data-market="${s.market}"
+    data-infolder="${fEnc}"
+    ondragstart="monDragStart(event,this)"
+    ondragend="monDragEnd(event)"
+    ondragover="monItemDragOver(event)"
+    ondragleave="monItemDragLeave(event)"
+    ondrop="monItemDrop(event,this)"
+    onclick="openStockModal('${s.id}','${s.market}')">
+    <span class="drag-handle" onclick="event.stopPropagation()">⠿</span>
+    <span class="sig watch" id="msig-${s.id}"></span>
+    <div style="flex:1;min-width:0">
+      <div class="scode">${s.id.toUpperCase()}</div>
+      <div class="sname">${MON_NAMES[s.id.toUpperCase()]||s.id} <span style="font-size:9px">${s.market==='us'?'🇺🇸':'🇹🇼'}</span></div>
+    </div>
+    <div style="text-align:right;min-width:60px">
+      <div class="sprice" id="mprice-${s.id}" style="color:var(--text3)">—</div>
+      <div class="schange" id="mchg-${s.id}">—</div>
+    </div>
+    <span class="tag tb" id="mtag-${s.id}">—</span>
+    <button class="btn btn-sm" style="font-size:9px;padding:2px 5px;opacity:.55;flex-shrink:0" title="移入資料夾" onclick="event.stopPropagation();showMovePop('${s.id}',this)">📁</button>
+    <button class="btn btnd btn-sm" style="padding:3px 7px;font-size:10px;flex-shrink:0" onclick="event.stopPropagation();removeFromMonitor('${s.id}')">✕</button>
+  </div>`;
+}
+
+// ── 渲染資料夾 ────────────────────────────────────
+function _renderFolder(folder, idx){
+  const open=folder.open!==false;
+  const stocks=folder.stocks||[];
+  const fEnc=encodeURIComponent(folder.name);
+  let html=`<div class="folder-wrap" data-folderidx="${idx}" data-foldername="${fEnc}">
+    <div class="folder-hdr"
+      data-foldername="${fEnc}"
+      ondragover="folderHdrDragOver(event)"
+      ondragleave="folderHdrDragLeave(event)"
+      ondrop="folderHdrDrop(event,this)"
+      onclick="toggleFolder(${idx})">
+      <span style="font-size:13px">${open?'📂':'📁'}</span>
+      <span class="folder-name">${folder.name}</span>
+      <span class="folder-count">${stocks.length} 檔</span>
+      <span style="color:var(--text3);font-size:11px;margin-left:4px">${open?'▾':'▸'}</span>
+      <button class="btn btn-sm" style="font-size:9px;padding:2px 5px;margin-left:4px" title="重新命名" onclick="event.stopPropagation();renameFolder(${idx})">✏</button>
+      <button class="btn btnd btn-sm" style="font-size:9px;padding:2px 5px" title="刪除資料夾" onclick="event.stopPropagation();deleteFolder(${idx})">🗑</button>
+    </div>
+    <div class="folder-bod" style="display:${open?'block':'none'}">`;
+  if(stocks.length===0){
+    html+=`<div class="folder-empty">（空的，將股票拖曳到此資料夾）</div>`;
+  } else {
+    stocks.forEach(s=>{ html+=_renderMItem(s, folder.name); });
+  }
+  html+=`</div></div>`;
+  return html;
+}
+
 // ── Monitor 載入 ─────────────────────────────────
 async function loadMonitor(){
   const list=$('monitorList');
-  $('monBadge').textContent=`${monitorStocks.length} 檔`;
-  $('ms-count').textContent=monitorStocks.length+' 檔';
+  const total=countMonStocks();
+  $('monBadge').textContent=`${total} 檔`;
+  $('ms-count').textContent=total+' 檔';
 
-  // 1. 立即顯示骨架列（代號+名稱已知，價格等 API 回來再填）
-  const NAMES={
-    // 半導體
-    '2330':'台積電','2454':'聯發科','2303':'聯電','2308':'台達電',
-    '3034':'聯詠','2379':'瑞昱','6770':'力積電','3711':'日月光投控','2449':'京元電子',
-    '3443':'創意','6515':'穎崴','3081':'聯亞','2337':'旺宏','3533':'嘉澤','6274':'台燿',
-    // 電子/科技
-    '2317':'鴻海','2382':'廣達','2357':'華碩','2353':'宏碁','3008':'大立光',
-    '2395':'研華','4938':'和碩','2324':'仁寶','2356':'英業達','3231':'緯創',
-    '2377':'微星','2376':'技嘉','2385':'群光','2360':'致茂','3017':'奇鋐',
-    '2399':'映泰','3044':'健鼎','2301':'光寶科','3532':'台勝科',
-    '6669':'緯穎','6488':'環球晶','3035':'智原',
-    // 顯示/光電
-    '2409':'友達','3481':'群創','2448':'晶電','3189':'景碩',
-    // 網通
-    '2345':'智邦','3630':'新鉅科',
-    // 金融
-    '2881':'富邦金','2882':'國泰金','2891':'中信金','2886':'兆豐金',
-    '2884':'玉山金','2887':'台新金','2885':'元大金','2892':'第一金','5880':'合庫金',
-    '2880':'華南金','2883':'開發金','2890':'永豐金','5876':'上海商銀',
-    '2834':'臺企銀','2801':'彰銀',
-    // 電信
-    '2412':'中華電','3045':'台灣大','4904':'遠傳',
-    // 石化/材料
-    '1301':'台塑','1303':'南亞','1326':'台化','6505':'台塑化','1402':'遠東新',
-    // 鋼鐵/傳產
-    '2002':'中鋼','2006':'東和鋼鐵','2027':'大成鋼',
-    '1101':'台泥','1102':'亞泥','1216':'統一','1229':'聯華','1210':'大成','1702':'南僑',
-    // 航運
-    '2615':'萬海','2603':'長榮','2609':'陽明','2610':'華航','2618':'長榮航',
-    // 生技
-    '4119':'旭富','1795':'美時','6547':'高端疫苗',
-    // 觀光/零售
-    '2207':'和泰車','2912':'統一超','9910':'豐泰','9914':'美利達','9921':'巨大',
-    // ETF
-    '0050':'元大台灣50','0056':'元大高股息',
-    '00878':'國泰永續高股息','00881':'國泰台灣5G+',
-    '00900':'富邦特選高股息','00692':'富邦公司治理',
-    '006208':'富邦台50','00850':'元大ESG永續',
-    // 其他熱門
-    '2327':'國巨','2408':'南亞科','2344':'華邦電','3037':'欣興',
-    '2049':'上銀','1590':'亞德客','2354':'鴻準',
-    // 美股科技
-    'NVDA':'NVIDIA','AAPL':'Apple','TSLA':'Tesla','MSFT':'Microsoft',
-    'META':'Meta','AMZN':'Amazon','GOOGL':'Google','AMD':'AMD',
-    'INTC':'Intel','QCOM':'高通','AVGO':'博通','TSM':'台積ADR',
-    'ASML':'ASML','NFLX':'Netflix','CRM':'Salesforce',
-    'MU':'美光','AMAT':'應用材料','KLAC':'科磊','NOW':'ServiceNow','SNOW':'Snowflake','PLTR':'Palantir',
-    // 美股金融/消費
-    'JPM':'摩根大通','BAC':'美國銀行','GS':'高盛','V':'Visa','MA':'Mastercard',
-    'JNJ':'嬌生','UNH':'聯合健康','PFE':'輝瑞','ABBV':'艾伯維',
-    'WMT':'沃爾瑪','COST':'好市多','NKE':'耐吉',
-  };
-  list.innerHTML=monitorStocks.map(s=>`
-    <div class="mitem" id="mitem-${s.id}" onclick="openStockModal('${s.id}','${s.market}')" style="cursor:pointer">
-      <span class="sig watch" id="msig-${s.id}"></span>
-      <div style="flex:1">
-        <div class="scode">${s.id.toUpperCase()}</div>
-        <div class="sname">${NAMES[s.id.toUpperCase()]||s.id} <span style="font-size:9px">${s.market==='us'?'🇺🇸':'🇹🇼'}</span></div>
-      </div>
-      <div>
-        <div class="sprice" id="mprice-${s.id}" style="color:var(--text3)">載入中…</div>
-        <div class="schange" id="mchg-${s.id}">—</div>
-      </div>
-      <span class="tag tb" id="mtag-${s.id}">—</span>
-      <button class="btn btnd btn-sm" style="padding:3px 7px;font-size:10px;flex-shrink:0" onclick="event.stopPropagation();removeFromMonitor('${s.id}')">✕</button>
-    </div>`).join('');
+  // 1. 骨架渲染
+  let html='';
+  monitorStocks.forEach((item,idx)=>{
+    if(item&&item.type==='folder') html+=_renderFolder(item,idx);
+    else if(item&&item.id) html+=_renderMItem(item,null);
+  });
+  list.innerHTML=html||'<div style="padding:30px;text-align:center;color:var(--text3);font-size:12px">清單為空，輸入代號或名稱加入股票</div>';
 
-  // 2. 非同步抓 API，回來後更新各欄位
+  // 2. 非同步 API 更新報價
   try{
+    const flat=flattenMonStocks();
+    if(!flat.length) return;
     const r=await fetch(`${API}/monitor`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({stocks:monitorStocks}),signal:AbortSignal.timeout(25000)});
+      body:JSON.stringify({stocks:flat}),signal:AbortSignal.timeout(25000)});
     const data=await r.json();
     let buy=0,sell=0,hold=0;
     data.forEach(s=>{
@@ -2576,7 +2674,6 @@ async function loadMonitor(){
       if(cEl){ cEl.className='schange '+chgClass(chg); cEl.textContent=chgStr(chg); }
       if(tEl) tEl.outerHTML=signal2tag(s.quick_signal);
       if(sEl) sEl.className='sig '+sc;
-      // 更新名稱（API 回的比靜態字典準）
       const nEl=document.querySelector(`#mitem-${s.id} .sname`);
       if(nEl&&s.name) nEl.innerHTML=`${s.name} <span style="font-size:9px">${s.market==='US'?'🇺🇸':'🇹🇼'}</span>`;
     });
@@ -2585,12 +2682,164 @@ async function loadMonitor(){
     $('ms-sell').textContent=sell+' 檔';
     $('ms-hold').textContent=hold+' 檔';
   }catch(e){
-    // API 失敗時不清空列表，只在底部顯示提示
     const warn=document.createElement('div');
     warn.style.cssText='color:var(--yellow);font-size:10px;text-align:center;padding:8px';
-    warn.textContent='⚠ 即時報價載入失敗，顯示上次快取';
+    warn.textContent='⚠ 即時報價載入失敗';
     list.appendChild(warn);
   }
+}
+
+// ── 拖曳 Handler ─────────────────────────────────
+function monDragStart(e, el){
+  const id=el.dataset.stockid;
+  const folderEnc=el.dataset.infolder||'';
+  const inFolderName=folderEnc?decodeURIComponent(folderEnc):null;
+  _monDragSrc={id, inFolderName};
+  e.dataTransfer.effectAllowed='move';
+  e.dataTransfer.setData('text/plain', id);
+  setTimeout(()=>el.classList.add('dragging'),0);
+}
+function monDragEnd(e){
+  document.querySelectorAll('.mitem.dragging').forEach(el=>el.classList.remove('dragging'));
+  document.querySelectorAll('.mitem.drag-over-top,.mitem.drag-over-bot').forEach(el=>{
+    el.classList.remove('drag-over-top','drag-over-bot');
+  });
+}
+function monItemDragOver(e){
+  e.preventDefault(); e.dataTransfer.dropEffect='move';
+  const el=e.currentTarget;
+  const rect=el.getBoundingClientRect();
+  const isTop=e.clientY<rect.top+rect.height/2;
+  el.classList.toggle('drag-over-top',isTop);
+  el.classList.toggle('drag-over-bot',!isTop);
+}
+function monItemDragLeave(e){
+  e.currentTarget.classList.remove('drag-over-top','drag-over-bot');
+}
+function monItemDrop(e, el){
+  e.preventDefault();
+  el.classList.remove('drag-over-top','drag-over-bot');
+  if(!_monDragSrc) return;
+  const tgtId=el.dataset.stockid;
+  const tgtFolderEnc=el.dataset.infolder||'';
+  const tgtFN=tgtFolderEnc?decodeURIComponent(tgtFolderEnc):null;
+  if(_monDragSrc.id===tgtId){ _monDragSrc=null; return; }
+  const rect=el.getBoundingClientRect();
+  const before=e.clientY<rect.top+rect.height/2;
+  const srcItem=removeMonStockFromWhere(_monDragSrc.id);
+  if(!srcItem){ _monDragSrc=null; return; }
+  if(!tgtFN){
+    const ti=monitorStocks.findIndex(s=>!s.type&&s.id&&s.id.toUpperCase()===tgtId.toUpperCase());
+    monitorStocks.splice(ti>=0?(before?ti:ti+1):monitorStocks.length,0,srcItem);
+  } else {
+    const folder=monitorStocks.find(i=>i.type==='folder'&&i.name===tgtFN);
+    if(folder){
+      const ti=(folder.stocks||[]).findIndex(s=>s.id.toUpperCase()===tgtId.toUpperCase());
+      (folder.stocks=folder.stocks||[]).splice(ti>=0?(before?ti:ti+1):folder.stocks.length,0,srcItem);
+    } else { monitorStocks.push(srcItem); }
+  }
+  _monDragSrc=null;
+  saveMonitor(); loadMonitor();
+}
+function folderHdrDragOver(e){
+  e.preventDefault(); e.dataTransfer.dropEffect='move';
+  e.currentTarget.classList.add('drag-over');
+}
+function folderHdrDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
+function folderHdrDrop(e, el){
+  e.preventDefault(); e.stopPropagation();
+  el.classList.remove('drag-over');
+  if(!_monDragSrc) return;
+  const folderName=el.dataset.foldername?decodeURIComponent(el.dataset.foldername):'';
+  if(!folderName){ _monDragSrc=null; return; }
+  const srcItem=removeMonStockFromWhere(_monDragSrc.id);
+  if(!srcItem){ _monDragSrc=null; return; }
+  const folder=monitorStocks.find(i=>i.type==='folder'&&i.name===folderName);
+  if(folder){ (folder.stocks=folder.stocks||[]).push(srcItem); }
+  else { monitorStocks.push(srcItem); }
+  _monDragSrc=null;
+  saveMonitor(); loadMonitor();
+}
+
+// ── 資料夾管理 ────────────────────────────────────
+function addFolder(){
+  const name=prompt('請輸入資料夾名稱：');
+  if(!name||!name.trim()) return;
+  if(monitorStocks.find(i=>i.type==='folder'&&i.name===name.trim())){
+    alert('已有相同名稱的資料夾');return;
+  }
+  monitorStocks.push({type:'folder',name:name.trim(),open:true,stocks:[]});
+  saveMonitor(); loadMonitor();
+}
+function toggleFolder(idx){
+  const f=monitorStocks[idx];
+  if(f&&f.type==='folder'){ f.open=!f.open; saveMonitor(); loadMonitor(); }
+}
+function renameFolder(idx){
+  const f=monitorStocks[idx];
+  if(!f||f.type!=='folder') return;
+  const n=prompt('新資料夾名稱：',f.name);
+  if(n&&n.trim()&&n.trim()!==f.name){ f.name=n.trim(); saveMonitor(); loadMonitor(); }
+}
+function deleteFolder(idx){
+  const f=monitorStocks[idx];
+  if(!f||f.type!=='folder') return;
+  if(!confirm(`刪除資料夾「${f.name}」？\n（${(f.stocks||[]).length} 檔股票將移回根清單）`)) return;
+  const stocks=f.stocks||[];
+  monitorStocks.splice(idx,1);
+  monitorStocks.push(...stocks);
+  saveMonitor(); loadMonitor();
+}
+
+// ── 移入資料夾彈窗 ────────────────────────────────
+let _movePop=null;
+function showMovePop(stockId, btn){
+  closeMovePop();
+  const folders=monitorStocks.filter(i=>i.type==='folder');
+  if(!folders.length){ alert('尚未建立任何資料夾，請先按「📁 新資料夾」'); return; }
+  const pop=document.createElement('div');
+  pop.className='mfolder-pop';
+  const rect=btn.getBoundingClientRect();
+  pop.style.cssText=`top:${rect.bottom+window.scrollY+4}px;left:${Math.max(4,rect.left+window.scrollX-120)}px`;
+  // Header
+  const hdr=document.createElement('div');
+  hdr.style.cssText='padding:7px 14px;font-size:10px;color:var(--text3);border-bottom:1px solid var(--border2)';
+  hdr.textContent='移入資料夾';
+  pop.appendChild(hdr);
+  // Folder items
+  folders.forEach(f=>{
+    const row=document.createElement('div');
+    row.className='mfolder-pop-item';
+    row.innerHTML=`📁 ${f.name} <span style="font-size:9px;color:var(--text3)">(${(f.stocks||[]).length})</span>`;
+    row.onclick=()=>{ moveMonStockToFolder(stockId,f.name); closeMovePop(); };
+    pop.appendChild(row);
+  });
+  // Remove from folder option (if currently in a folder)
+  const inFolder=monitorStocks.find(i=>i.type==='folder'&&(i.stocks||[]).find(s=>s.id.toUpperCase()===stockId.toUpperCase()));
+  if(inFolder){
+    const row=document.createElement('div');
+    row.className='mfolder-pop-item';
+    row.style.borderTop='1px solid var(--border2)';
+    row.innerHTML=`↩ 移出資料夾`;
+    row.onclick=()=>{ moveMonStockToFolder(stockId,null); closeMovePop(); };
+    pop.appendChild(row);
+  }
+  document.body.appendChild(pop);
+  _movePop=pop;
+  setTimeout(()=>document.addEventListener('click',closeMovePop,{once:true}),0);
+}
+function closeMovePop(){ if(_movePop){ _movePop.remove(); _movePop=null; } }
+function moveMonStockToFolder(stockId, folderName){
+  const srcItem=removeMonStockFromWhere(stockId);
+  if(!srcItem) return;
+  if(folderName){
+    const f=monitorStocks.find(i=>i.type==='folder'&&i.name===folderName);
+    if(f){ (f.stocks=f.stocks||[]).push(srcItem); }
+    else { monitorStocks.push(srcItem); }
+  } else {
+    monitorStocks.push(srcItem);
+  }
+  saveMonitor(); loadMonitor();
 }
 
 function selectMonStock(id,name,price){
@@ -2614,10 +2863,10 @@ async function addToMonitor(){
   const id=$('addStockInput').value.trim().toUpperCase();
   const market=$('addMarketSel').value;
   if(!id) return;
-  if(monitorStocks.find(s=>s.id===id)){ alert('已在監控清單中'); return; }
+  if(findMonStock(id)){ alert('已在監控清單中'); return; }
   monitorStocks.push({id,market});
   saveMonitor();
-  $('addStockInput').value='';
+  $('addStockInput').value=''; hideAC('addAcList');
   loadMonitor();
 }
 
@@ -2728,7 +2977,7 @@ async function loadNewsForRec(stockId,market){
   }catch(e){ el.textContent='新聞載入失敗'; }
 }
 
-function addWatchFromRec(id,market){ if(!monitorStocks.find(s=>s.id===id)){ monitorStocks.push({id,market}); saveMonitor(); } alert(`已加入監控：${id}`); }
+function addWatchFromRec(id,market){ if(!findMonStock(id)){ monitorStocks.push({id,market}); saveMonitor(); } alert(`已加入監控：${id}`); }
 
 // ── 股票自動完成（台股+美股） ──────────────────────
 const TW_AC_DATA = Object.entries({
