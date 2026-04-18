@@ -849,12 +849,16 @@ select option{background:var(--bg2)}
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">
       <div class="ctitle" id="techChartTitle" style="margin-bottom:0">📊 K線圖</div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-        <!-- 縮放按鈕 -->
-        <div style="display:flex;gap:2px;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 4px;align-items:center">
-          <button onclick="kZoom('in')"    title="放大（減少K棒）" style="background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:0 4px;line-height:1">－</button>
-          <span id="kZoomLabel" style="font-size:10px;color:var(--text3);min-width:32px;text-align:center">60根</span>
-          <button onclick="kZoom('out')"   title="縮小（增加K棒）" style="background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:0 4px;line-height:1">＋</button>
-          <button onclick="kZoom('reset')" title="全覽" style="background:none;border:none;color:var(--accent);font-size:10px;cursor:pointer;padding:0 4px">全</button>
+        <!-- 日期範圍選擇 -->
+        <div style="display:flex;gap:3px;background:rgba(0,0,0,.25);border-radius:5px;padding:3px 6px;align-items:center">
+          <button onclick="kZoom('in')"  title="縮短範圍" style="background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:0 3px;line-height:1">－</button>
+          <input type="date" id="kDateStart" onchange="kDateFilter()"
+            style="background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.2);color:var(--text2);font-size:10px;padding:1px 2px;width:88px;cursor:pointer">
+          <span style="color:var(--text3);font-size:10px">—</span>
+          <input type="date" id="kDateEnd" onchange="kDateFilter()"
+            style="background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.2);color:var(--text2);font-size:10px;padding:1px 2px;width:88px;cursor:pointer">
+          <button onclick="kZoom('out')" title="延伸範圍" style="background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:0 3px;line-height:1">＋</button>
+          <button onclick="kZoom('reset')" title="全覽" style="background:none;border:none;color:var(--accent);font-size:10px;cursor:pointer;padding:0 3px">全</button>
         </div>
         <!-- 事件開關 -->
         <button id="evtToggleBtn" onclick="toggleEventMarkers()"
@@ -1699,10 +1703,29 @@ function drawLineChart(canvasId,labelsId,closes,dates){
 // ── K 線圖全域狀態 ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 const _ks={
-  viewBars:60, minBars:20,
+  dateStart:null, dateEnd:null,   // 日期篩選（null = 不限）
   hist:null, instData:null, events:[], showEvents:true,
   sub1Mode:'vol', sub2Mode:'macd',
 };
+// ── 取得顯示範圍 index ─────────────────────────────────────────────
+function _kIdxRange(){
+  if(!_ks.hist) return {startIdx:0,endIdx:0,showN:0};
+  const dates=_ks.hist.dates||[];
+  const n=dates.length;
+  let si=Math.max(0,n-90), ei=n;                   // 預設最近 90 根
+  if(_ks.dateStart){
+    const found=dates.findIndex(d=>(d||'').slice(0,10)>=_ks.dateStart);
+    if(found>=0) si=found;
+  }
+  if(_ks.dateEnd){
+    for(let i=n-1;i>=0;i--){
+      if((dates[i]||'').slice(0,10)<=_ks.dateEnd){ei=i+1;break;}
+    }
+  }
+  si=Math.max(0,si); ei=Math.min(n,ei);
+  if(ei-si<5) si=Math.max(0,ei-5);
+  return {startIdx:si, endIdx:ei, showN:ei-si};
+}
 const SUB_MODES=[
   {id:'vol',      label:'成交量'},
   {id:'foreign',  label:'外資'},
@@ -1715,13 +1738,34 @@ const SUB_MODES=[
   {id:'bollinger',label:'布林+K線'},
 ];
 
-// ── 縮放 ───────────────────────────────────────────────────────
+// ── 縮放（調整日期範圍）─────────────────────────────────────────
 function kZoom(dir){
-  const n=_ks.hist?(_ks.hist.closes||[]).length:120;
-  if(dir==='in')    _ks.viewBars=Math.max(_ks.minBars, Math.round(_ks.viewBars*0.65));
-  else if(dir==='out') _ks.viewBars=Math.min(n, Math.round(_ks.viewBars*1.55));
-  else               _ks.viewBars=n;
-  const zl=$('kZoomLabel'); if(zl) zl.textContent=_ks.viewBars+'根';
+  if(!_ks.hist) return;
+  const dates=_ks.hist.dates||[]; if(!dates.length) return;
+  const n=dates.length;
+  if(dir==='reset'){
+    _ks.dateStart=null; _ks.dateEnd=null;
+    const s=$('kDateStart'),e=$('kDateEnd');
+    if(s) s.value=''; if(e) e.value='';
+    redrawTechChart(); return;
+  }
+  const {startIdx,endIdx,showN}=_kIdxRange();
+  const step=Math.max(5,Math.round(showN*0.3));
+  // in = 縮短（移動 startIdx 往後）; out = 延伸（移動 startIdx 往前）
+  let newSI=dir==='in'?startIdx+step:startIdx-step;
+  newSI=Math.max(0,Math.min(newSI,endIdx-10));
+  _ks.dateStart=(dates[newSI]||'').slice(0,10)||null;
+  _ks.dateEnd=(dates[endIdx-1]||'').slice(0,10)||null;
+  const s=$('kDateStart'),e=$('kDateEnd');
+  if(s&&_ks.dateStart) s.value=_ks.dateStart;
+  if(e&&_ks.dateEnd)   e.value=_ks.dateEnd;
+  redrawTechChart();
+}
+// ── 日期輸入框觸發 ─────────────────────────────────────────────
+function kDateFilter(){
+  const s=$('kDateStart'),e=$('kDateEnd');
+  _ks.dateStart=s?.value||null;
+  _ks.dateEnd=e?.value||null;
   redrawTechChart();
 }
 
@@ -1806,8 +1850,9 @@ function redrawTechChart(){
 }
 function redrawSub(p){
   const mode=p===1?_ks.sub1Mode:_ks.sub2Mode;
-  const thresh=parseFloat($(('bigTrader'+p+'Val'))?.value||500);
-  _drawSubChart('subChart'+p,'sub'+p+'YLabel',mode,_ks.hist,_ks.instData,_ks.viewBars,thresh);
+  const thresh=parseFloat($('bigTrader'+p+'Val')?.value||500);
+  const {startIdx,endIdx}=_kIdxRange();
+  _drawSubChart('subChart'+p,'sub'+p+'YLabel',mode,_ks.hist,_ks.instData,startIdx,endIdx,thresh);
 }
 
 // ── 主圖繪製 ───────────────────────────────────────────────────────
@@ -1822,11 +1867,10 @@ function _drawMainKline(){
   ctx.scale(dpr,dpr);
   const W=canvas.offsetWidth, H=260;
   const n=closes.length;
-  const showN=Math.min(_ks.viewBars,n);
-  const startIdx=n-showN;
-  const vClosesSlice=closes.slice(startIdx);
-  const vHighsSlice=highs.slice(startIdx);
-  const vLowsSlice=lows.slice(startIdx);
+  const {startIdx,endIdx,showN}=_kIdxRange();
+  const vClosesSlice=closes.slice(startIdx,endIdx);
+  const vHighsSlice=highs.slice(startIdx,endIdx);
+  const vLowsSlice=lows.slice(startIdx,endIdx);
   const colW=(W-55)/showN;
   const allP=[...vHighsSlice,...vLowsSlice];
   const pMin=Math.min(...allP)*0.998, pMax=Math.max(...allP)*1.002;
@@ -1845,7 +1889,7 @@ function _drawMainKline(){
   const ma20All=closes.map((_,i)=>i<19?null:closes.slice(i-19,i+1).reduce((a,b)=>a+b)/20);
   [[ma5All,'rgba(76,201,240,.8)'],[ma20All,'rgba(255,209,102,.8)']].forEach(([arr,color])=>{
     ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=1.5; let started=false;
-    for(let ii=startIdx;ii<n;ii++){
+    for(let ii=startIdx;ii<endIdx;ii++){
       if(arr[ii]===null) continue;
       const x=5+(ii-startIdx+.5)*colW;
       !started?(ctx.moveTo(x,toY(arr[ii])),started=true):ctx.lineTo(x,toY(arr[ii]));
@@ -1853,7 +1897,7 @@ function _drawMainKline(){
     ctx.stroke();
   });
   // K 棒
-  for(let ii=startIdx;ii<n;ii++){
+  for(let ii=startIdx;ii<endIdx;ii++){
     const i=ii-startIdx;
     const x=5+i*colW+colW*.1;
     const bw=Math.max(colW*.8,1);
@@ -1870,7 +1914,7 @@ function _drawMainKline(){
   }
   // 事件標記
   if(_ks.showEvents&&_ks.events.length&&dates){
-    const visDate=dates.slice(startIdx);
+    const visDate=dates.slice(startIdx,endIdx);
     _ks.events.forEach(ev=>{
       const idx=visDate.findIndex(d=>d&&d.slice(0,10)===ev.date);
       if(idx<0) return;
@@ -1889,7 +1933,7 @@ function _drawMainKline(){
   // X 軸日期
   const labEl=$('klineLabels');
   if(labEl&&dates){
-    const vDates=dates.slice(startIdx);
+    const vDates=dates.slice(startIdx,endIdx);
     const step=Math.floor(showN/5)||1;
     const picks=[0,step,step*2,step*3,showN-1].map(i=>vDates[Math.min(i,vDates.length-1)]);
     labEl.innerHTML=picks.filter(Boolean).map(d=>`<span>${d.slice(5)}</span>`).join('');
@@ -1897,13 +1941,13 @@ function _drawMainKline(){
 }
 
 // ── 副圖繪製 ───────────────────────────────────────────────────────
-function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
+function _drawSubChart(canvasId,yLabelId,mode,hist,instData,startIdx,endIdx,bigThresh){
   const canvas=$(canvasId); if(!canvas) return;
   if(!hist||!hist.closes){canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);return;}
   const {closes,opens,highs,lows,dates,volumes}=hist;
   const n=closes.length;
-  const showN=Math.min(viewBars,n);
-  const startIdx=n-showN;
+  endIdx=Math.min(endIdx,n); startIdx=Math.max(0,startIdx);
+  const showN=endIdx-startIdx;
   const ctx=canvas.getContext('2d');
   const dpr=window.devicePixelRatio||1;
   canvas.width=canvas.offsetWidth*dpr; canvas.height=90*dpr;
@@ -1933,8 +1977,8 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
   }
 
   if(mode==='vol'){
-    const slice=volumes?volumes.slice(startIdx):[];
-    const priceSlice=closes.slice(startIdx);
+    const slice=volumes?volumes.slice(startIdx,endIdx):[];
+    const priceSlice=closes.slice(startIdx,endIdx);
     const maxV=Math.max(...slice,1);
     slice.forEach((v,i)=>{
       const x=5+i*colW+colW*.1; const bw=Math.max(colW*.8,1);
@@ -1948,7 +1992,7 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
     let vals=[];
     if(!instData){vals=Array(showN).fill(0);}
     else{
-      const dSlice=dates.slice(startIdx);
+      const dSlice=dates.slice(startIdx,endIdx);
       vals=dSlice.map(d=>{
         const key=d?d.slice(0,10):'';
         if(mode==='foreign') return instData.foreign?.[key]??0;
@@ -1965,8 +2009,8 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
     }
   }
   else if(mode==='bigtrader'){
-    const vols=volumes?volumes.slice(startIdx):[];
-    const priceSlice=closes.slice(startIdx);
+    const vols=volumes?volumes.slice(startIdx,endIdx):[];
+    const priceSlice=closes.slice(startIdx,endIdx);
     const thresh=bigThresh||500;
     const maxV=Math.max(...vols,1);
     vols.forEach((v,i)=>{
@@ -1994,7 +2038,7 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
     const dif=ema12.map((v,i)=>v-ema26[i]);
     const dea=ema(dif,9);
     const hist2=dif.map((v,i)=>v-dea[i]);
-    const vH=hist2.slice(startIdx),vD=dif.slice(startIdx),vS=dea.slice(startIdx);
+    const vH=hist2.slice(startIdx,endIdx),vD=dif.slice(startIdx,endIdx),vS=dea.slice(startIdx,endIdx);
     const maxH=Math.max(...vH.map(Math.abs),0.001);
     const zero=H*0.55;
     // 柱狀
@@ -2027,7 +2071,7 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
       else    {losses=(losses*(p-1)-d)/p;gains=gains*(p-1)/p;}
       rsis.push(losses===0?100:gains===0?0:100-100/(1+gains/losses));
     }
-    const vRsi=rsis.slice(startIdx);
+    const vRsi=rsis.slice(startIdx,endIdx);
     const toRY=v=>H-8-((v)/100)*(H-18);
     // 70/30 帶
     ctx.fillStyle='rgba(255,77,109,.06)';
@@ -2052,8 +2096,8 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
     const std=src.map((_,i)=>{if(i<p-1)return null;const sl=src.slice(i-p+1,i+1);const m=sl.reduce((a,b)=>a+b)/p;return Math.sqrt(sl.reduce((a,b)=>a+(b-m)**2,0)/p);});
     const upper=mid.map((m,i)=>m===null?null:m+std[i]*2);
     const lower=mid.map((m,i)=>m===null?null:m-std[i]*2);
-    const vSlice=[closes,opens,highs,lows].map(a=>a.slice(startIdx));
-    const vUp=upper.slice(startIdx),vMid=mid.slice(startIdx),vLo=lower.slice(startIdx);
+    const vSlice=[closes,opens,highs,lows].map(a=>a.slice(startIdx,endIdx));
+    const vUp=upper.slice(startIdx,endIdx),vMid=mid.slice(startIdx,endIdx),vLo=lower.slice(startIdx,endIdx);
     const allV=[...vSlice[2],...vSlice[3],...vUp.filter(Boolean),...vLo.filter(Boolean)];
     const bMin=Math.min(...allV)*0.999,bMax=Math.max(...allV)*1.001;
     const toBy=v=>H-8-((v-bMin)/(bMax-bMin))*(H-18);
@@ -2087,7 +2131,7 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,viewBars,bigThresh){
 // ── OHLC Tooltip（canvas 點擊） ────────────────────────────────────
 function _bindKlineEvents(){
   const canvas=$('klineChart'); if(!canvas) return;
-  // 滾輪縮放
+  // 滾輪縮放（向上=縮短範圍/放大，向下=延伸範圍/縮小）
   canvas.addEventListener('wheel',e=>{
     e.preventDefault();
     kZoom(e.deltaY<0?'in':'out');
@@ -2096,9 +2140,7 @@ function _bindKlineEvents(){
   canvas.addEventListener('click',e=>{
     if(!_ks.hist) return;
     const {closes,opens,highs,lows,dates,volumes}=_ks.hist;
-    const n=closes.length;
-    const showN=Math.min(_ks.viewBars,n);
-    const startIdx=n-showN;
+    const {startIdx,endIdx,showN}=_kIdxRange();
     const rect=canvas.getBoundingClientRect();
     const cx=(e.clientX-rect.left)*(canvas.width/rect.width)/(window.devicePixelRatio||1);
     const W=canvas.offsetWidth;
@@ -2141,11 +2183,16 @@ function drawKlineChart(canvasId,labelsId,hist,events){
   // tech 主圖改用新系統
   if(canvasId==='klineChart'){
     _ks.hist=hist;
-    const zl=$('kZoomLabel');
-    if(zl&&_ks.viewBars===60){
-      _ks.viewBars=Math.min(hist.closes.length,60);
-      zl.textContent=_ks.viewBars+'根';
-    }
+    // 預設顯示最近 90 根（約 4.5 個月）
+    const dates=hist.dates||[];
+    const n=dates.length;
+    const defStart=(dates[Math.max(0,n-90)]||'').slice(0,10);
+    const defEnd=(dates[n-1]||'').slice(0,10);
+    _ks.dateStart=defStart||null;
+    _ks.dateEnd=defEnd||null;
+    const s=$('kDateStart'),e=$('kDateEnd');
+    if(s&&defStart) s.value=defStart;
+    if(e&&defEnd)   e.value=defEnd;
     _drawMainKline();
     initSubTabs();
     _bindKlineEvents();

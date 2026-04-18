@@ -1460,10 +1460,24 @@ def api_news(stock_id):
         ticker = yf.Ticker(f"{stock_id}.TW" if len(stock_id) == 4 and stock_id.isdigit() else stock_id)
         news = ticker.news or []
         for n in news[:10]:
-            title = n.get("title", "")
-            link = n.get("link", "#")
+            # 相容新舊兩種 yfinance 新聞格式
+            content = n.get("content") or {}
+            title = n.get("title") or content.get("title", "")
+            link = (n.get("link")
+                    or (content.get("canonicalUrl") or {}).get("url", "")
+                    or "#")
             pub = n.get("providerPublishTime", 0)
-            publisher = n.get("publisher", "")
+            if not pub:
+                pub_str = content.get("pubDate", "")
+                if pub_str:
+                    try:
+                        pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+                        pub = pub_dt.timestamp()
+                    except Exception:
+                        pub = 0
+            publisher = (n.get("publisher")
+                         or (content.get("provider") or {}).get("displayName", "")
+                         or "")
             pub_time = datetime.fromtimestamp(pub).strftime("%m/%d %H:%M") if pub else ""
             # 情感分析（擴充至 60+ 關鍵字，覆蓋繁體中文、英文、財報術語）
             title_lower = title.lower()
@@ -1577,19 +1591,26 @@ def api_events(stock_id):
     # ── 財報日（季報）─────────────────────────────
     try:
         fs_rows = finmind_fetch("TaiwanStockFinancialStatements", stock_id, start_date=yr_ago)
-        # 依 date 分組取唯一
-        fs_map = {}
+        # 依 date 取唯一（type 欄位是財務科目名稱，不是季別，改從日期月份推算）
+        fs_dates = set()
         for row in (fs_rows or []):
             d = (row.get("date") or "").strip()
-            if d and yr_ago <= d <= today_str and d not in fs_map:
-                t = row.get("type", "")
-                # type 欄位為 "Q1"/"Q2"/"Q3"/"Q4" 或空字串
-                fs_map[d] = t if t else "財報"
-        for d, q in sorted(fs_map.items()):
+            if d and yr_ago <= d <= today_str:
+                fs_dates.add(d)
+        for d in sorted(fs_dates):
+            try:
+                d_dt = datetime.strptime(d, "%Y-%m-%d")
+                month = d_dt.month
+                if month == 3:   q_label = f"{d_dt.year} Q1"
+                elif month == 6: q_label = f"{d_dt.year} Q2"
+                elif month == 9: q_label = f"{d_dt.year} Q3"
+                else:            q_label = f"{d_dt.year} Q4"
+            except Exception:
+                q_label = ""
             events.append({
                 "date": d, "type": "earnings",
                 "label": "財", "color": "#a29bfe",
-                "desc": f"財報公告 {q}"
+                "desc": f"財報公告 {q_label}"
             })
     except Exception as e:
         print(f"[Events] earnings {stock_id}: {e}")
