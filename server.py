@@ -1062,6 +1062,43 @@ def logo():
 def health():
     return jsonify({"status": "ok", "time": datetime.now().isoformat()})
 
+@app.route("/api/debug/tw/<stock_id>")
+def debug_tw(stock_id):
+    """診斷單支台股資料來源是否正常"""
+    result = {}
+    # 1. FinMind history
+    try:
+        start = (datetime.now() - timedelta(days=95)).strftime("%Y-%m-%d")
+        fm_rows = finmind_fetch("TaiwanStockPrice", stock_id, start_date=start)
+        result["finmind_rows"] = len(fm_rows)
+        result["finmind_sample"] = fm_rows[-1] if fm_rows else None
+    except Exception as e:
+        result["finmind_error"] = str(e)
+    # 2. yfinance
+    try:
+        import yfinance as _yf
+        df = _yf.Ticker(f"{stock_id}.TW").history(period="5d")
+        result["yfinance_rows"] = len(df)
+        result["yfinance_last"] = float(df["Close"].iloc[-1]) if not df.empty else None
+    except Exception as e:
+        result["yfinance_error"] = str(e)
+    # 3. fetch_tw_history (combined)
+    try:
+        hist = fetch_tw_history(stock_id)
+        result["hist_closes"] = len(hist.get("closes", [])) if hist else 0
+    except Exception as e:
+        result["hist_error"] = str(e)
+    # 4. recommend cache status
+    cached = cache_get("recommend")
+    if cached:
+        result["recommend_cache"] = {
+            "tw_count": len(cached.get("tw", [])),
+            "us_count": len(cached.get("us", []))
+        }
+    else:
+        result["recommend_cache"] = None
+    return jsonify(result)
+
 @app.route("/api/index")
 def api_index():
     """大盤指數（台灣加權 + 美股三大指數）全用 history()"""
