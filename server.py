@@ -261,6 +261,11 @@ TW_STOCKS_DB = {
     "2327": "國巨", "2408": "南亞科", "2344": "華邦電",
     "3037": "欣興", "2049": "上銀", "1590": "亞德客",
     "2354": "鴻準", "3673": "TPK宸鴻",
+    # ── 補充常見標的（使用者監控清單中可能用到）──────────────────
+    "6533": "富采控股", "4958": "臻鼎-KY", "5274": "信驊",
+    "6279": "胡連",    "6261": "久元",    "6757": "台光電",
+    "3596": "智易",    "6781": "AES-KY",  "6271": "同欣電",
+    "6449": "網家",
 }
 
 # 美股篩選候選池（涵蓋科技、半導體、消費、金融、能源）
@@ -547,7 +552,16 @@ def fetch_tw_price_yfinance(stock_id):
             if price:
                 change = round(price - prev, 2)
                 change_pct = round((change / prev) * 100, 2) if prev else 0
-                name = TW_STOCKS_DB.get(stock_id, stock_id)
+                # 名稱優先順序：DB → yfinance shortName → 代號本身
+                name = TW_STOCKS_DB.get(stock_id)
+                if not name:
+                    try:
+                        info = yf.Ticker(f"{stock_id}{suffix}").info
+                        name = (info.get("shortName") or info.get("longName") or stock_id)
+                        # 去掉 yfinance 常見的後綴雜訊
+                        name = name.replace(" Corporation","").replace(" Co., Ltd.","").strip()
+                    except Exception:
+                        name = stock_id
                 result = {
                     "id": stock_id, "name": name,
                     "price": price, "yesterday": prev,
