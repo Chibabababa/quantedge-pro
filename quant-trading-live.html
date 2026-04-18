@@ -2096,8 +2096,9 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,startIdx,endIdx,bigT
     const dea=ema(dif,9);
     const hist2=dif.map((v,i)=>v-dea[i]);
     const vH=hist2.slice(startIdx,endIdx),vD=dif.slice(startIdx,endIdx),vS=dea.slice(startIdx,endIdx);
-    const maxH=Math.max(...vH.map(Math.abs),0.001);
-    const zero=H*0.55;
+    // 以直方柱 + DIF + DEA 三者中最大值為縮放基準，加 15% 上下留白
+    const maxH=Math.max(...vH.map(Math.abs),...vD.map(Math.abs),...vS.map(Math.abs),0.001)*1.15;
+    const zero=H*0.58; // 零線稍微往下移，留更多上方空間給正值線條
     // 柱狀
     vH.forEach((v,i)=>{
       const x=5+i*colW+colW*.1; const bw=Math.max(colW*.8,1);
@@ -2129,7 +2130,7 @@ function _drawSubChart(canvasId,yLabelId,mode,hist,instData,startIdx,endIdx,bigT
       rsis.push(losses===0?100:gains===0?0:100-100/(1+gains/losses));
     }
     const vRsi=rsis.slice(startIdx,endIdx);
-    const toRY=v=>H-8-((v)/100)*(H-18);
+    const toRY=v=>H-8-(Math.max(0,Math.min(100,v))/100)*(H-18);
     // 70/30 帶
     ctx.fillStyle='rgba(255,77,109,.06)';
     ctx.fillRect(0,toRY(100),W-55,toRY(70)-toRY(100));
