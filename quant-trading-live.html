@@ -1583,6 +1583,9 @@ function go(id){
   if(!pg) return;
   pg.classList.add('active');
   const t=$('tab-'+id); if(t) t.classList.add('active');
+  // 記錄目前分頁到 URL hash，重整後可恢復
+  if(history.replaceState) history.replaceState(null,'','#'+id);
+  else location.hash=id;
   if(id==='dashboard') loadDashboard();
   if(id==='monitor') loadMonitor();
   if(id==='recommend') loadRecommend();
@@ -2954,7 +2957,14 @@ window.addEventListener('load',async()=>{
   tick();
   const ok=await checkServer();
   if(ok){
-    loadDashboard();
+    // 從 URL hash 恢復分頁，若無 hash 則預設總覽
+    const initPage=(location.hash||'').replace('#','').trim();
+    const validPages=['dashboard','monitor','screener','technical','strategy','recommend'];
+    if(initPage && validPages.includes(initPage)){
+      go(initPage);
+    } else {
+      loadDashboard();
+    }
     startAutoRefresh();
   }
   setInterval(()=>checkServer(),30000);
