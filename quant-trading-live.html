@@ -347,8 +347,14 @@ select option{background:var(--bg2)}
       <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace" id="mainChartLabels"></div>
     </div>
     <div class="card">
-      <div class="ctitle">⚡ 即時訊號 <span class="badge" id="signalTime">更新中</span></div>
-      <div id="signalList" class="rec10-grid" style="margin-top:8px"><div class="loading" style="grid-column:1/-1"><div class="spinner"></div>載入訊號...</div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div class="ctitle" style="margin:0">🏆 推薦選股清單 <span class="badge" id="signalTime">更新中</span></div>
+        <div style="display:flex;gap:2px;background:rgba(0,0,0,.3);border-radius:6px;padding:2px">
+          <button id="recBtn-tw" class="tf-btn tf-on" onclick="switchRecMarket('tw')">🇹🇼 台股</button>
+          <button id="recBtn-us" class="tf-btn"       onclick="switchRecMarket('us')">🇺🇸 美股</button>
+        </div>
+      </div>
+      <div id="signalList" class="rec10-grid" style="margin-top:8px"><div class="loading" style="grid-column:1/-1"><div class="spinner"></div>推薦選股載入中...</div></div>
     </div>
   </div>
 
@@ -2311,9 +2317,24 @@ function drawEquityCurve(canvasId,equity){
   ctx.stroke();
 }
 
-// ── 推薦10檔（dashboard rec10）──────────────────────
+// ── 推薦選股清單 ──────────────────────────────────
+let _recData={tw:[],us:[]};
+let _recMarket='tw';
+
+function switchRecMarket(m){
+  _recMarket=m;
+  ['tw','us'].forEach(k=>{
+    const btn=$('recBtn-'+k);
+    if(btn){ btn.classList.toggle('tf-on', k===m); }
+  });
+  renderSignals(_recData[m]||[]);
+}
+
 function renderSignals(data){
-  if(!data||data.length===0){ $('signalList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px;grid-column:1/-1">暫無推薦</div>'; return; }
+  if(!data||data.length===0){
+    $('signalList').innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;font-size:12px;grid-column:1/-1">暫無推薦資料</div>';
+    return;
+  }
   $('signalList').innerHTML=data.slice(0,10).map(s=>{
     const chg=s.change_pct||0;
     const wr=s.winrate!=null?s.winrate:null;
@@ -2352,29 +2373,31 @@ function renderMarketTable(data){
   }).join('');
 }
 
-// ── 即時訊號（可獨立重試）──────────────────────────
+// ── 推薦選股載入（可獨立重試）────────────────────
 let _signalRetryTimer=null;
 async function loadSignals(){
   if(_signalRetryTimer){clearTimeout(_signalRetryTimer);_signalRetryTimer=null;}
-  $('signalList').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>訊號載入中…</div>';
+  $('signalList').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>推薦選股載入中…</div>';
   try{
     const r=await fetch(`${API}/recommend`,{signal:AbortSignal.timeout(90000)});
     if(!r.ok) throw new Error('HTTP '+r.status);
     const isWarming=r.headers.get('X-Warming')==='1';
     const d=await r.json();
-    if(isWarming||!Array.isArray(d)||d.length===0){
-      // 伺服器正在背景計算，20秒後自動重試
+    // 判斷是否為新格式 {tw:[],us:[]}
+    const hasTw=d&&typeof d==='object'&&Array.isArray(d.tw);
+    if(isWarming||!hasTw||(d.tw.length===0&&d.us.length===0)){
       $('signalList').innerHTML=`
         <div style="grid-column:1/-1;padding:16px;text-align:center">
           <div style="font-size:22px;margin-bottom:8px">⚙️</div>
           <div style="font-size:12px;color:var(--text3);margin-bottom:10px">
-            訊號計算中，20秒後自動更新…
+            正在全量掃描台股 & 美股，首次需要 1–2 分鐘…
           </div>
           <button class="btn btn-sm" onclick="loadSignals()" style="font-size:11px">🔄 立即重試</button>
         </div>`;
-      _signalRetryTimer=setTimeout(()=>loadSignals(),20000);
+      _signalRetryTimer=setTimeout(()=>loadSignals(),30000);
     } else {
-      renderSignals(d);
+      _recData=d;
+      renderSignals(_recData[_recMarket]||[]);
     }
   }catch(e){
     const isTimeout=(e.name==='TimeoutError'||e.name==='AbortError');
@@ -2393,7 +2416,7 @@ async function loadSignals(){
 // ── Dashboard 載入 ────────────────────────────────
 async function loadDashboard(){
   loadIndex();loadMainChart();
-  // 即時訊號：呼叫 /api/recommend 取推薦標的作為訊號來源
+  // 推薦選股：呼叫 /api/recommend 取前10台股+前10美股
   loadSignals();
   // 市場概況表格
   try{
@@ -2547,12 +2570,14 @@ function refreshMonitor(){ loadMonitor(); }
 
 // ── 推薦股票 ─────────────────────────────────────
 async function loadRecommend(){
-  $('recCards').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI正在分析市場，首次載入約需 30–60 秒…</div>';
+  $('recCards').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI正在全量掃描台股 & 美股，首次約需 1–2 分鐘…</div>';
   $('recUpdateTime').textContent='篩選中...';
   try{
     const r=await fetch(`${API}/recommend`,{signal:AbortSignal.timeout(90000)});
     if(!r.ok) throw new Error('HTTP '+r.status);
-    const data=await r.json();
+    const raw=await r.json();
+    // 相容新格式 {tw:[],us:[]} 與舊格式 []
+    const data=Array.isArray(raw)?raw:[...(raw.tw||[]),...(raw.us||[])];
     if(!data||data.length===0){ $('recCards').innerHTML='<div style="color:var(--text3);padding:40px;text-align:center">⚠ 目前無推薦數據，稍後再試</div>'; return; }
     $('recCards').innerHTML=data.map(s=>{
       const chg=s.change_pct||0;

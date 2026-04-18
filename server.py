@@ -1270,21 +1270,13 @@ _recommend_warming = False   # 防止同時多次背景計算
 _recommend_lock    = threading.Lock()
 
 def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
-    """計算今日推薦股票（耗時操作，應在背景執行）"""
-    import random as _rnd
-    _rnd.seed(datetime.now().toordinal())
+    """計算推薦股票：掃描全部台股 & 美股候選池，各取前10（依評分排序）"""
+    # 全量掃描，不隨機抽樣
+    tw_candidates = list(TW_STOCKS_DB.keys())
+    us_candidates = list(US_STOCKS_SCREEN)
 
-    core_tw = ["2330", "0050", "2317", "2454", "2412", "2881", "2603", "6505"]
-    pool_tw = [s for s in TW_STOCKS_DB if s not in core_tw]
-    extra_tw = _rnd.sample(pool_tw, min(12, len(pool_tw)))
-    tw_candidates = core_tw + extra_tw
-
-    core_us = ["NVDA", "AAPL", "MSFT", "META", "TSLA"]
-    pool_us = [s for s in US_STOCKS_SCREEN if s not in core_us]
-    extra_us = _rnd.sample(pool_us, min(5, len(pool_us)))
-    us_candidates = core_us + extra_us
-
-    results = []
+    tw_results = []
+    us_results = []
 
     def fetch_tw(stock_id):
         try:
@@ -1377,30 +1369,45 @@ def _compute_recommend_data(tw_tp=0.08, tw_sl=0.05, us_tp=0.10, us_sl=0.05):
             print(f"Recommend US error {sym}: {e}")
             return None
 
-    all_tasks = [(fetch_tw, s) for s in tw_candidates] + [(fetch_us, s) for s in us_candidates]
-    with ThreadPoolExecutor(max_workers=12) as ex:
-        futures = [ex.submit(fn, s) for fn, s in all_tasks]
-        for future in as_completed(futures, timeout=60):
+    # 台股並行掃描（加大 worker 數量）
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        tw_futures = {ex.submit(fetch_tw, s): s for s in tw_candidates}
+        for future in as_completed(tw_futures, timeout=90):
             try:
                 r = future.result(timeout=30)
                 if r:
-                    results.append(r)
+                    tw_results.append(r)
             except Exception as e:
-                print(f"Recommend future error: {e}")
+                print(f"Recommend TW future error: {e}")
 
-    results.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
-    cache_set("recommend", results, 600)
-    print(f"[Recommend] 快取更新完畢，共 {len(results)} 檔")
-    return results
+    # 美股並行掃描
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        us_futures = {ex.submit(fetch_us, s): s for s in us_candidates}
+        for future in as_completed(us_futures, timeout=60):
+            try:
+                r = future.result(timeout=30)
+                if r:
+                    us_results.append(r)
+            except Exception as e:
+                print(f"Recommend US future error: {e}")
+
+    # 各自依評分排序，各取前10
+    tw_results.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
+    us_results.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
+    payload = {"tw": tw_results[:10], "us": us_results[:10]}
+
+    cache_set("recommend", payload, 3600)  # 快取 1 小時
+    print(f"[Recommend] 更新完畢 — 台股 {len(tw_results)} 檔取前10 / 美股 {len(us_results)} 檔取前10")
+    return payload
 
 def _bg_warm_recommend():
-    """背景執行緒：預熱推薦快取，啟動後延遲 5 秒執行，之後每 10 分鐘更新"""
+    """背景執行緒：啟動後延遲 10 秒執行，之後每 1 小時更新"""
     global _recommend_warming
-    time.sleep(5)           # 讓 Flask 完全啟動後再開始
+    time.sleep(10)           # 讓 Flask 完全啟動後再開始
     while True:
         with _recommend_lock:
             if _recommend_warming:
-                time.sleep(30)
+                time.sleep(60)
                 continue
             _recommend_warming = True
         try:
@@ -1410,7 +1417,7 @@ def _bg_warm_recommend():
         finally:
             with _recommend_lock:
                 _recommend_warming = False
-        time.sleep(600)     # 10 分鐘後再更新
+        time.sleep(3600)     # 1 小時後再更新
 
 # 在 module 載入時啟動背景執行緒（gunicorn fork 後每個 worker 各跑一條）
 _warm_thread = threading.Thread(target=_bg_warm_recommend, daemon=True)
