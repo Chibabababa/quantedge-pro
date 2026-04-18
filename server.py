@@ -1494,6 +1494,7 @@ def _fetch_cnyes_news(stock_id: str, limit: int = 10) -> list:
         return []
     data = r.json().get("items", {}).get("data", [])
     results = []
+    one_month_ago = datetime.now().timestamp() - 30 * 86400
     for n in data:
         news_id = n.get("newsId", "")
         title   = n.get("title", "")
@@ -1504,6 +1505,9 @@ def _fetch_cnyes_news(stock_id: str, limit: int = 10) -> list:
         pub_time = (datetime.fromtimestamp(pub_ts).strftime("%m/%d %H:%M")
                     if pub_ts else "")
         if not title:
+            continue
+        # 過濾超過 1 個月的新聞
+        if pub_ts and pub_ts < one_month_ago:
             continue
         results.append({
             "title":     title,
@@ -1519,6 +1523,7 @@ def _fetch_cnyes_news(stock_id: str, limit: int = 10) -> list:
 def _fetch_yfinance_news(stock_id: str, limit: int = 10) -> list:
     """yfinance 新聞（適合美股/ETF），相容新舊格式"""
     results = []
+    one_month_ago = datetime.now().timestamp() - 30 * 86400
     try:
         sym = f"{stock_id}.TW" if (len(stock_id) == 4 and stock_id.isdigit()) else stock_id
         news = yf.Ticker(sym).news or []
@@ -1542,6 +1547,9 @@ def _fetch_yfinance_news(stock_id: str, limit: int = 10) -> list:
                          or "")
             pub_time = datetime.fromtimestamp(pub).strftime("%m/%d %H:%M") if pub else ""
             if not title:
+                continue
+            # 過濾超過 1 個月的新聞
+            if pub and pub < one_month_ago:
                 continue
             results.append({
                 "title":     title,
