@@ -2535,6 +2535,7 @@ async function addToMonitor(){
   if(!id) return;
   if(monitorStocks.find(s=>s.id===id)){ alert('已在監控清單中'); return; }
   monitorStocks.push({id,market});
+  saveMonitor();
   $('addStockInput').value='';
   loadMonitor();
 }
@@ -2644,7 +2645,7 @@ async function loadNewsForRec(stockId,market){
   }catch(e){ el.textContent='新聞載入失敗'; }
 }
 
-function addWatchFromRec(id,market){ if(!monitorStocks.find(s=>s.id===id)) monitorStocks.push({id,market}); alert(`已加入監控：${id}`); }
+function addWatchFromRec(id,market){ if(!monitorStocks.find(s=>s.id===id)){ monitorStocks.push({id,market}); saveMonitor(); } alert(`已加入監控：${id}`); }
 function viewTech(id,market){ $('techStockInput').value=id; $('techMarket').value=market; go('technical'); }
 
 // ── 技術指標 ─────────────────────────────────────
