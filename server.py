@@ -1511,6 +1511,31 @@ def api_news(stock_id):
     cache_set(f"news_{stock_id}", news_list, 600)
     return jsonify(news_list)
 
+@app.route("/api/chart_data/<stock_id>")
+def api_chart_data(stock_id):
+    """K線副圖資料：三大法人每日買賣超（180天，30分快取）"""
+    cached = cache_get(f"chart_data_{stock_id}")
+    if cached is not None:
+        return jsonify(cached)
+    result = {"foreign": {}, "trust": {}, "dealer": {}}
+    try:
+        start = (datetime.now() - timedelta(days=200)).strftime("%Y-%m-%d")
+        rows  = finmind_fetch("TaiwanStockInstitutionalInvestorsBuySell",
+                              stock_id, start_date=start)
+        for row in (rows or []):
+            d    = (row.get("date") or "").strip()
+            name = row.get("name", "")
+            diff = int(row.get("diff", 0) or 0)
+            if not d: continue
+            if   "外資" in name: result["foreign"][d] = diff
+            elif "投信" in name: result["trust"][d]   = diff
+            elif "自營" in name: result["dealer"][d]  = diff
+    except Exception as e:
+        print(f"[chart_data] {stock_id}: {e}")
+    cache_set(f"chart_data_{stock_id}", result, 1800)
+    return jsonify(result)
+
+
 @app.route("/api/events/<stock_id>")
 def api_events(stock_id):
     """台股重大事件（除權息、財報日）— FinMind 資料，1小時快取"""
