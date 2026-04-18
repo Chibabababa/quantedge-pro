@@ -1459,6 +1459,10 @@ def api_news(stock_id):
     try:
         ticker = yf.Ticker(f"{stock_id}.TW" if len(stock_id) == 4 and stock_id.isdigit() else stock_id)
         news = ticker.news or []
+        # debug：印出第一則原始結構，方便排查欄位名稱
+        if news:
+            print(f"[News DEBUG] keys of first item: {list(news[0].keys())}")
+            print(f"[News DEBUG] first item: {str(news[0])[:400]}")
         for n in news[:10]:
             # 相容新舊兩種 yfinance 新聞格式
             content = n.get("content") or {}
