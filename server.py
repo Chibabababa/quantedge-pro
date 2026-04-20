@@ -52,7 +52,9 @@ _twse_semaphore = threading.Semaphore(3)   # 最多 3 個並行 TWSE 請求
 _yf_semaphore   = threading.Semaphore(5)   # 最多 5 個並行 yfinance 請求
 
 # ─── FinMind API ─────────────────────────────────────────────
-FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiY2hpYmFiYWJhIiwiZW1haWwiOiJlYXRiYTczQGdtYWlsLmNvbSJ9.WFy4oNQD7wvqfQCKeXPUe1eQDWhBzZsxRXsicuQpVp0"
+FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
+if not FINMIND_TOKEN:
+    print("⚠️  警告：FINMIND_TOKEN 環境變數未設定，FinMind 相關功能將無法使用")
 FINMIND_BASE  = "https://api.finmindtrade.com/api/v4/data"
 
 def finmind_fetch(dataset, stock_id, start_date=None, end_date=None):
