@@ -1080,7 +1080,7 @@ select option{background:var(--bg2)}
 // 自動偵測 API 位置：本機開發用 localhost:5000，部署時使用同域 /api
 const API = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
   ? "http://localhost:5000/api"
-  : window.location.origin + "/proxy.php/api";
+  : "/api";
 
 // ── SEARCH ─────────────────────────────────────────
 async function onSearch(q){
